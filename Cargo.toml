@@ -1,0 +1,32 @@
+[package]
+name = "bevy_embedded"
+version = "0.17.2"
+edition = "2024"
+description = "Embedded widget support for Bevy Engine"
+homepage = "https://bevyengine.org"
+repository = "https://github.com/bevyengine/bevy"
+license = "MIT OR Apache-2.0"
+keywords = ["bevy", "embedded", "widget", "ios", "android"]
+
+[dependencies]
+bevy = { version = "0.17.2", default-features = false, features = ["std", "bevy_render"]}
+raw-window-handle = "0.6"
+crossbeam-channel = "0.5"
+log = "0.4"
+
+[workspace]
+resolver = "2"
+members = ["examples/mobile"]
+
+[target.'cfg(target_os = "ios")'.dependencies]
+raw-window-metal = "1.1"
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-ui-kit = "0.3"
+objc2-core-graphics = "0.3"
+block2 = "0.6"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk = "0.9"
+ndk-sys = "0.6"

@@ -1,0 +1,21 @@
+[package]
+name = "bevy_mobile_embedded_example"
+# Version is required by `cargo-apk`, though this value will never change.
+version = "0.0.0"
+edition = "2024"
+description = "Example for building an iOS or Android app with Bevy"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "bevy_mobile_embedded_example"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+bevy = "0.17.2"
+bevy_embedded = { path = "../../" }
+bytemuck = "1.14"
+
+[profile.release]
+strip = true  # Strip symbols
+lto = true    # Link-time optimization
