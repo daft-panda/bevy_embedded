@@ -21,3 +21,4 @@ target
 .idea/
 xcuserdata
 *.xcworkspace 
+.DS_Store
