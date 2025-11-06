@@ -87,6 +87,19 @@ if [ -z "${ANDROID_NDK_ROOT}" ]; then
         echo "   Example: export ANDROID_NDK_ROOT=\$HOME/Android/Sdk/ndk/26.1.10909125"
         exit 1
     fi
+else
+    # If ANDROID_NDK_ROOT is set but doesn't contain toolchains, it might be pointing
+    # to the ndk directory instead of a specific version. Try to find the version.
+    if [ ! -d "${ANDROID_NDK_ROOT}/toolchains" ]; then
+        if [ -d "${ANDROID_NDK_ROOT}" ]; then
+            # Find the latest NDK version in this directory
+            NDK_VERSION=$(ls -d ${ANDROID_NDK_ROOT}/* 2>/dev/null | sort -V | tail -1)
+            if [ -n "$NDK_VERSION" ] && [ -d "$NDK_VERSION/toolchains" ]; then
+                ANDROID_NDK_ROOT="$NDK_VERSION"
+                echo "📍 Using NDK version: ${ANDROID_NDK_ROOT}"
+            fi
+        fi
+    fi
 fi
 
 export ANDROID_NDK_ROOT
@@ -156,10 +169,35 @@ for TARGET in "${TARGETS[@]}"; do
     echo "📦 Copied to: ${JNI_LIBS_DIR}/lib${LIBRARY_NAME}.so"
 
     # Copy libc++_shared.so from NDK
-    LIBCXX_PATH="${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${TARGET}/libc++_shared.so"
+    # Map Rust target to NDK sysroot triple
+    case "$TARGET" in
+        "aarch64-linux-android")
+            NDK_TRIPLE="aarch64-linux-android"
+            ;;
+        "armv7-linux-androideabi")
+            NDK_TRIPLE="arm-linux-androideabi"
+            ;;
+        "x86_64-linux-android")
+            NDK_TRIPLE="x86_64-linux-android"
+            ;;
+        *)
+            NDK_TRIPLE="$TARGET"
+            ;;
+    esac
+
+    # Detect host platform
+    case "$(uname -s)" in
+        Linux*)  NDK_HOST="linux-x86_64" ;;
+        Darwin*) NDK_HOST="darwin-x86_64" ;;
+        *) NDK_HOST="linux-x86_64" ;;
+    esac
+
+    LIBCXX_PATH="${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/${NDK_HOST}/sysroot/usr/lib/${NDK_TRIPLE}/libc++_shared.so"
     if [ -f "$LIBCXX_PATH" ]; then
         cp "$LIBCXX_PATH" "$JNI_LIBS_DIR/"
         echo "📦 Copied libc++_shared.so"
+    else
+        echo "⚠️  Warning: libc++_shared.so not found at: $LIBCXX_PATH"
     fi
 
     # Show library info

@@ -87,10 +87,10 @@ macro_rules! export_embedded_app {
 
             let mut app = App::new();
 
-            // Add the EmbeddedPlugin FIRST so it can create the window before RenderPlugin builds
+            // Add the EmbeddedPlugin first so it can create the window before RenderPlugin builds
             app.add_plugins($crate::EmbeddedPlugin);
 
-            // Create the window by requesting it from the host BEFORE adding other plugins
+            // Create the window by requesting it from the host before adding other plugins
             #[cfg(target_os = "ios")]
             $crate::ios::create_window_from_host(&mut app);
 
@@ -115,6 +115,8 @@ macro_rules! export_embedded_app {
         pub unsafe extern "C" fn bevy_embedded_update(app: *mut bevy::app::App) {
             use bevy::app::PluginsState;
             use bevy::tasks::tick_global_task_pools_on_main_thread;
+            use bevy::time::{TimeUpdateStrategy, TimeSender};
+            use bevy::platform::time::Instant;
 
             if !app.is_null() {
                 unsafe {
@@ -127,6 +129,12 @@ macro_rules! export_embedded_app {
                         }
                         app.finish();
                         app.cleanup();
+                    }
+
+                    // Send current time to render world if available
+                    let now = Instant::now();
+                    if let Some(time_sender) = app.world().get_resource::<TimeSender>() {
+                        let _ = time_sender.0.try_send(now);
                     }
 
                     app.update();
