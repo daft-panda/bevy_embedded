@@ -139,9 +139,9 @@ fun sendColor(
         if (isRandom) {
             // Generate random color
             floatArrayOf(
-                Math.random().toFloat(),
-                Math.random().toFloat(),
-                Math.random().toFloat(),
+                kotlin.random.Random.nextFloat(),
+                kotlin.random.Random.nextFloat(),
+                kotlin.random.Random.nextFloat(),
                 1.0f,
             )
         } else {
@@ -157,34 +157,38 @@ fun sendColor(
 }
 
 fun handleBevyMessage(data: ByteArray): String =
-    when (data.size) {
-        64 -> {
-            // Camera matrix (Mat4 = 16 floats = 64 bytes)
-            val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
-            val floats = FloatArray(16) { buffer.getFloat() }
+    try {
+        when (data.size) {
+            64 -> {
+                // Camera matrix (Mat4 = 16 floats = 64 bytes)
+                val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+                val floats = FloatArray(16) { buffer.getFloat() }
 
-            """Camera Mat4:
+                """Camera Mat4:
 [%.2f %.2f %.2f %.2f]
 [%.2f %.2f %.2f %.2f]
 [%.2f %.2f %.2f %.2f]
 [%.2f %.2f %.2f %.2f]""".format(
-                floats[0],
-                floats[1],
-                floats[2],
-                floats[3],
-                floats[4],
-                floats[5],
-                floats[6],
-                floats[7],
-                floats[8],
-                floats[9],
-                floats[10],
-                floats[11],
-                floats[12],
-                floats[13],
-                floats[14],
-                floats[15],
-            )
+                    floats[0],
+                    floats[1],
+                    floats[2],
+                    floats[3],
+                    floats[4],
+                    floats[5],
+                    floats[6],
+                    floats[7],
+                    floats[8],
+                    floats[9],
+                    floats[10],
+                    floats[11],
+                    floats[12],
+                    floats[13],
+                    floats[14],
+                    floats[15],
+                )
+            }
+            else -> "Received ${data.size} bytes"
         }
-        else -> "Received ${data.size} bytes"
+    } catch (e: Exception) {
+        "Error parsing message: ${e.message}"
     }

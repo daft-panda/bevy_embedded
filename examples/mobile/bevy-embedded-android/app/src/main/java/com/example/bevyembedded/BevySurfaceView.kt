@@ -3,187 +3,227 @@ package com.example.bevyembedded
 import android.content.Context
 import android.util.AttributeSet
 import android.util.Log
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.concurrent.thread
 
 /**
  * Android SurfaceView that hosts the Bevy engine
- * This is the Android equivalent of iOS's BevyMetalView
  */
-class BevySurfaceView @JvmOverloads constructor(
-    context: Context,
-    attrs: AttributeSet? = null,
-    defStyleAttr: Int = 0
-) : SurfaceView(context, attrs, defStyleAttr), SurfaceHolder.Callback {
+class BevySurfaceView
+    @JvmOverloads
+    constructor(
+        context: Context,
+        attrs: AttributeSet? = null,
+        defStyleAttr: Int = 0,
+    ) : SurfaceView(context, attrs, defStyleAttr),
+        SurfaceHolder.Callback {
+        companion object {
+            private const val TAG = "BevySurfaceView"
 
-    companion object {
-        private const val TAG = "BevySurfaceView"
-
-        // Touch phase constants matching Rust
-        private const val PHASE_STARTED = 0
-        private const val PHASE_MOVED = 1
-        private const val PHASE_ENDED = 2
-        private const val PHASE_CANCELED = 3
-    }
-
-    private var bevyAppPtr: Long = 0
-    private val isRunning = AtomicBoolean(false)
-    private var renderThread: Thread? = null
-
-    var onMessageReceived: ((ByteArray) -> Unit)? = null
-    private val scaleFactor: Float = context.resources.displayMetrics.density
-
-    init {
-        holder.addCallback(this)
-        // Enable touch events
-        isClickable = true
-        isFocusable = true
-    }
-
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        Log.d(TAG, "Surface created")
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        Log.d(TAG, "Surface changed: ${width}x${height} @ ${scaleFactor}x scale")
-
-        if (bevyAppPtr == 0L) {
-            // First time - create the Bevy app
-            setupBevy(holder.surface, width, height)
-        } else {
-            // Surface resized - notify Bevy
-            BevyNative.nativeResize(bevyAppPtr, width, height, scaleFactor)
+            // Touch phase constants matching Rust
+            private const val PHASE_STARTED = 0
+            private const val PHASE_MOVED = 1
+            private const val PHASE_ENDED = 2
+            private const val PHASE_CANCELED = 3
         }
-    }
 
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        Log.d(TAG, "Surface destroyed")
-        stopBevy()
-    }
+        private var bevyAppPtr: Long = 0
+        private val isRunning = AtomicBoolean(false)
+        private val choreographer = Choreographer.getInstance()
 
-    private fun setupBevy(surface: Surface, width: Int, height: Int) {
-        Log.d(TAG, "Setting up Bevy...")
+        var onMessageReceived: ((ByteArray) -> Unit)? = null
+        private val scaleFactor: Float = context.resources.displayMetrics.density
 
-        try {
-            bevyAppPtr = BevyNative.nativeCreateApp(surface, width, height, scaleFactor)
+        init {
+            holder.addCallback(this)
+            // Enable touch events
+            isClickable = true
+            isFocusable = true
+        }
 
-            if (bevyAppPtr != 0L) {
-                Log.d(TAG, "Bevy app created successfully: $bevyAppPtr")
-                startRenderLoop()
+        override fun surfaceCreated(holder: SurfaceHolder) {
+            Log.d(TAG, "Surface created")
+        }
+
+        override fun surfaceChanged(
+            holder: SurfaceHolder,
+            format: Int,
+            width: Int,
+            height: Int,
+        ) {
+            Log.d(TAG, "Surface changed: ${width}x$height @ ${scaleFactor}x scale")
+
+            if (bevyAppPtr == 0L) {
+                // First time - create the Bevy app
+                setupBevy(holder.surface, width, height)
             } else {
-                Log.e(TAG, "Failed to create Bevy app")
+                // Surface resized - notify Bevy and restart rendering if we were running
+                BevyNative.nativeResize(bevyAppPtr, width, height, scaleFactor)
+                if (!isRunning.get()) {
+                    startRenderLoop()
+                }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error creating Bevy app", e)
         }
-    }
 
-    private fun startRenderLoop() {
-        isRunning.set(true)
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            Log.d(TAG, "Surface destroyed")
+            // Only stop rendering, don't destroy Bevy - it might come back
+            pauseRendering()
+        }
 
-        renderThread = thread(start = true, name = "BevyRenderThread") {
+        private fun setupBevy(
+            surface: Surface,
+            width: Int,
+            height: Int,
+        ) {
+            Log.d(TAG, "Setting up Bevy...")
+
+            try {
+                bevyAppPtr = BevyNative.nativeCreateApp(surface, width, height, scaleFactor)
+
+                if (bevyAppPtr != 0L) {
+                    Log.d(TAG, "Bevy app created successfully: $bevyAppPtr")
+                    startRenderLoop()
+                } else {
+                    Log.e(TAG, "Failed to create Bevy app")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error creating Bevy app", e)
+            }
+        }
+
+        private fun startRenderLoop() {
+            isRunning.set(true)
             Log.d(TAG, "Render loop started")
 
-            while (isRunning.get() && bevyAppPtr != 0L) {
-                try {
-                    // Update Bevy (renders one frame)
-                    BevyNative.nativeUpdate(bevyAppPtr)
+            // Schedule the first frame
+            choreographer.postFrameCallback(frameCallback)
+        }
 
-                    // Poll for messages from Bevy
-                    pollBevyMessages()
+        private val frameCallback =
+            object : Choreographer.FrameCallback {
+                override fun doFrame(frameTimeNanos: Long) {
+                    if (!isRunning.get() || bevyAppPtr == 0L) {
+                        Log.d(TAG, "Render loop stopped")
+                        return
+                    }
 
-                    // Limit to ~60 FPS
-                    Thread.sleep(16)
-                } catch (e: InterruptedException) {
-                    Log.d(TAG, "Render loop interrupted")
-                    break
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error in render loop", e)
+                    try {
+                        // Update Bevy (renders one frame)
+                        BevyNative.nativeUpdate(bevyAppPtr)
+
+                        // Poll for messages from Bevy
+                        pollBevyMessages()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error in render loop", e)
+                    }
+
+                    // Schedule next frame
+                    choreographer.postFrameCallback(this)
                 }
             }
 
-            Log.d(TAG, "Render loop stopped")
-        }
-    }
-
-    private fun pollBevyMessages() {
-        try {
-            val message = BevyNative.nativeReceiveMessage(bevyAppPtr)
-            if (message != null && message.isNotEmpty()) {
-                // Call callback on main thread
-                post {
+        private fun pollBevyMessages() {
+            try {
+                val message = BevyNative.nativeReceiveMessage(bevyAppPtr)
+                if (message != null && message.isNotEmpty()) {
+                    // Choreographer callbacks run on main thread, so we can invoke directly
                     onMessageReceived?.invoke(message)
                 }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error polling messages", e)
-        }
-    }
-
-    private fun stopBevy() {
-        isRunning.set(false)
-
-        renderThread?.apply {
-            interrupt()
-            join(1000) // Wait up to 1 second
-        }
-        renderThread = null
-
-        if (bevyAppPtr != 0L) {
-            try {
-                BevyNative.nativeDestroy(bevyAppPtr)
-                Log.d(TAG, "Bevy app destroyed")
             } catch (e: Exception) {
-                Log.e(TAG, "Error destroying Bevy app", e)
+                Log.e(TAG, "Error polling messages", e)
             }
-            bevyAppPtr = 0
-        }
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (bevyAppPtr == 0L) return super.onTouchEvent(event)
-
-        val phase = when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> PHASE_STARTED
-            MotionEvent.ACTION_MOVE -> PHASE_MOVED
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> PHASE_ENDED
-            MotionEvent.ACTION_CANCEL -> PHASE_CANCELED
-            else -> return super.onTouchEvent(event)
         }
 
-        val pointerIndex = event.actionIndex
-        val x = event.getX(pointerIndex)
-        val y = event.getY(pointerIndex)
-        val id = event.getPointerId(pointerIndex).toLong()
+        private fun pauseRendering() {
+            if (isRunning.compareAndSet(true, false)) {
+                Log.d(TAG, "Pausing rendering")
+                choreographer.removeFrameCallback(frameCallback)
+            }
+        }
 
-        try {
+        private fun stopBevy() {
+            pauseRendering()
+
+            if (bevyAppPtr != 0L) {
+                try {
+                    BevyNative.nativeDestroy(bevyAppPtr)
+                    Log.d(TAG, "Bevy app destroyed")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error destroying Bevy app", e)
+                }
+                bevyAppPtr = 0
+            }
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (bevyAppPtr == 0L) return super.onTouchEvent(event)
+
+            try {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                        // Send event for the pointer that just went down
+                        val pointerIndex = event.actionIndex
+                        sendTouchEvent(PHASE_STARTED, event, pointerIndex)
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        // Send events for all active pointers
+                        for (i in 0 until event.pointerCount) {
+                            sendTouchEvent(PHASE_MOVED, event, i)
+                        }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                        // Send event for the pointer that just went up
+                        val pointerIndex = event.actionIndex
+                        sendTouchEvent(PHASE_ENDED, event, pointerIndex)
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        // Send cancel for all active pointers
+                        for (i in 0 until event.pointerCount) {
+                            sendTouchEvent(PHASE_CANCELED, event, i)
+                        }
+                    }
+                    else -> return super.onTouchEvent(event)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending touch event", e)
+            }
+
+            performClick()
+            return true
+        }
+
+        override fun performClick(): Boolean {
+            super.performClick()
+            return true
+        }
+
+        private fun sendTouchEvent(phase: Int, event: MotionEvent, pointerIndex: Int) {
+            val x = event.getX(pointerIndex)
+            val y = event.getY(pointerIndex)
+            val id = event.getPointerId(pointerIndex).toLong()
             BevyNative.nativeTouchEvent(bevyAppPtr, phase, x, y, id)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error sending touch event", e)
         }
 
-        return true
-    }
-
-    /**
-     * Send a message to Bevy
-     */
-    fun sendMessage(data: ByteArray) {
-        if (bevyAppPtr != 0L) {
-            try {
-                BevyNative.nativeSendMessage(bevyAppPtr, data)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending message", e)
+        /**
+         * Send a message to Bevy
+         */
+        fun sendMessage(data: ByteArray) {
+            if (bevyAppPtr != 0L && isRunning.get()) {
+                try {
+                    BevyNative.nativeSendMessage(bevyAppPtr, data)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending message", e)
+                }
             }
         }
-    }
 
-    override fun onDetachedFromWindow() {
-        super.onDetachedFromWindow()
-        stopBevy()
+        override fun onDetachedFromWindow() {
+            super.onDetachedFromWindow()
+            stopBevy()
+        }
     }
-}
