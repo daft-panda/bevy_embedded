@@ -22,3 +22,4 @@ target
 xcuserdata
 *.xcworkspace 
 .DS_Store
+.claude

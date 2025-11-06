@@ -1,4 +1,15 @@
-# Bevy Embedded for iOS
+# Bevy Embedded for Mobile (iOS & Android)
+
+Complete examples showing how to embed the Bevy game engine into native mobile applications.
+
+## Examples
+
+- **[iOS (SwiftUI)](./test-bevy-embedded/)** - iOS app using SwiftUI and Metal
+- **[Android (Jetpack Compose)](./bevy-embedded-android/)** - Android app using Jetpack Compose and Vulkan
+
+---
+
+## iOS Example
 
 A complete example showing how to embed the Bevy game engine into a native iOS SwiftUI application.
 
@@ -247,6 +258,51 @@ Bevy logs are visible in Xcode console. Configure in your app:
 ## Troubleshooting
 
 See [XCODE_SETUP.md](./XCODE_SETUP.md#troubleshooting) for common issues and solutions.
+
+---
+
+## Android Example
+
+A complete example showing how to embed the Bevy game engine into a native Android application using Jetpack Compose.
+
+## Features
+
+✨ **Clean API**: Trait-based Rust API and Kotlin-friendly controller
+🔄 **Bidirectional Messaging**: Send data between Kotlin and Bevy
+🎮 **Touch Input**: Full touch event support
+📱 **Universal**: Supports devices and emulators (ARM64, ARMv7, x86_64)
+⚡ **Automatic Builds**: Gradle automatically compiles Rust during build
+
+## Quick Start
+
+### 1. Prerequisites
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Add Android targets
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+
+# Install cargo-ndk
+cargo install cargo-ndk
+
+# Set up Android NDK
+export ANDROID_NDK_ROOT=$HOME/Android/Sdk/ndk/26.1.10909125
+```
+
+### 2. Build and Run
+
+```bash
+cd bevy-embedded-android
+../build_android.sh release
+```
+
+Then open the project in Android Studio and run it.
+
+### 3. Full Documentation
+
+See [bevy-embedded-android/README.md](./bevy-embedded-android/README.md) for complete setup instructions, API reference, and troubleshooting.
 
 ## License
 
