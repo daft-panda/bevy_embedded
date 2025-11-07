@@ -97,6 +97,10 @@ macro_rules! export_embedded_app {
             #[cfg(target_os = "android")]
             $crate::android::create_window_from_host(&mut app);
 
+            // Configure embedded asset source for Android (must be before plugins)
+            #[cfg(target_os = "android")]
+            $crate::android::configure_embedded_asset_source(&mut app);
+
             // Call post-init hook
             <$app_type>::post_init(&mut app);
 
@@ -114,9 +118,9 @@ macro_rules! export_embedded_app {
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn bevy_embedded_update(app: *mut bevy::app::App) {
             use bevy::app::PluginsState;
-            use bevy::tasks::tick_global_task_pools_on_main_thread;
-            use bevy::time::{TimeUpdateStrategy, TimeSender};
             use bevy::platform::time::Instant;
+            use bevy::tasks::tick_global_task_pools_on_main_thread;
+            use bevy::time::{TimeSender, TimeUpdateStrategy};
 
             if !app.is_null() {
                 unsafe {

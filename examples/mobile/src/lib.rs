@@ -11,7 +11,7 @@ use bevy_embedded::{export_embedded_app, prelude::*};
 struct MobileEmbeddedExample;
 
 impl EmbeddedApp for MobileEmbeddedExample {
-    fn setup(app: &mut App) {
+    fn setup(mut app: &mut App) {
         // Configure plugins and systems
         app.add_plugins(
             DefaultPlugins

@@ -1,22 +1,37 @@
 //! Android-specific embedded integration with JNI functions
-
 use crate::HostChannel;
 use bevy::{
     app::App,
+    asset::{
+        AssetApp,
+        io::{
+            AssetReader, AssetReaderError, AssetSourceBuilder, AssetSourceId, PathStream, Reader,
+            VecReader,
+        },
+    },
     log::info,
     math::Vec2,
-    window::{PrimaryWindow, RawHandleWrapper, RawHandleWrapperHolder, Window, WindowResolution, WindowWrapper},
+    window::{
+        PrimaryWindow, RawHandleWrapper, RawHandleWrapperHolder, Window, WindowResolution,
+        WindowWrapper,
+    },
 };
-use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
-use std::sync::{Arc, Mutex};
-
-#[cfg(target_os = "android")]
+use futures_lite::stream;
 use jni::{
+    JNIEnv,
     objects::{JByteArray, JClass, JObject},
     sys::{jbyteArray, jfloat, jint, jlong},
-    JNIEnv,
 };
-
+use log::{debug, error};
+use raw_window_handle::{
+    AndroidDisplayHandle, AndroidNdkWindowHandle, HandleError, HasDisplayHandle, HasWindowHandle,
+    RawDisplayHandle, RawWindowHandle,
+};
+use std::{
+    ffi::{CString, c_void},
+    ptr::NonNull,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 /// Android surface information passed from Java/Kotlin
 #[repr(C)]
@@ -31,8 +46,6 @@ pub struct AndroidSurfaceInfo {
 // and is immediately consumed when creating the window.
 unsafe impl Send for AndroidSurfaceInfo {}
 unsafe impl Sync for AndroidSurfaceInfo {}
-
-use std::sync::OnceLock;
 
 /// Global storage for the current surface being initialized
 static CURRENT_SURFACE: OnceLock<Mutex<Option<AndroidSurfaceInfo>>> = OnceLock::new();
@@ -56,8 +69,8 @@ pub fn set_android_surface(surface: AndroidSurfaceInfo) {
 
 /// Wrapper for the Android native window that implements the required traits
 struct AndroidWindowWrapper {
-    window_handle: raw_window_handle::AndroidNdkWindowHandle,
-    display_handle: raw_window_handle::AndroidDisplayHandle,
+    window_handle: AndroidNdkWindowHandle,
+    display_handle: AndroidDisplayHandle,
 }
 
 unsafe impl Send for AndroidWindowWrapper {}
@@ -88,100 +101,310 @@ pub fn create_window_from_host(app: &mut App) {
     let surface_info = match get_android_surface() {
         Some(info) => info,
         None => {
-            info!("No Android surface available yet");
+            error!("No Android surface available yet");
             return;
         }
     };
 
     if surface_info.native_window.is_null() {
-        info!("Host did not provide a valid surface");
+        error!("Host did not provide a valid surface");
         return;
     }
 
-    info!(
+    debug!(
         "Creating embedded Android window: {}x{} @ {}x scale",
         surface_info.width, surface_info.height, surface_info.scale_factor
     );
 
-    #[cfg(target_os = "android")]
-    {
-        use std::ptr::NonNull;
+    // Create the window wrapper for raw-window-handle
+    let window_handle = AndroidNdkWindowHandle::new(
+        NonNull::new(surface_info.native_window).expect("Native window pointer is null"),
+    );
 
-        // Create the window wrapper for raw-window-handle
-        let window_handle = raw_window_handle::AndroidNdkWindowHandle::new(
-            NonNull::new(surface_info.native_window).expect("Native window pointer is null")
-        );
+    let display_handle = AndroidDisplayHandle::new();
 
-        let display_handle = raw_window_handle::AndroidDisplayHandle::new();
+    let android_wrapper = AndroidWindowWrapper {
+        window_handle,
+        display_handle,
+    };
 
-        let android_wrapper = AndroidWindowWrapper {
-            window_handle,
-            display_handle,
-        };
+    // Create WindowWrapper and RawHandleWrapper
+    let window_wrapper = WindowWrapper::new(android_wrapper);
+    let handle_wrapper =
+        RawHandleWrapper::new(&window_wrapper).expect("Failed to create RawHandleWrapper");
 
-        // Create WindowWrapper and RawHandleWrapper
-        let window_wrapper = WindowWrapper::new(android_wrapper);
-        let handle_wrapper =
-            RawHandleWrapper::new(&window_wrapper).expect("Failed to create RawHandleWrapper");
+    let handle_holder = RawHandleWrapperHolder(Arc::new(Mutex::new(Some(handle_wrapper.clone()))));
 
-        let handle_holder = RawHandleWrapperHolder(Arc::new(Mutex::new(Some(handle_wrapper.clone()))));
+    // Create the Window entity with the native surface
+    let window = Window {
+        resolution: WindowResolution::new(surface_info.width, surface_info.height)
+            .with_scale_factor_override(surface_info.scale_factor),
+        ..Default::default()
+    };
 
-        // Create the Window entity with the native surface
-        let window = Window {
-            resolution: WindowResolution::new(surface_info.width, surface_info.height)
-                .with_scale_factor_override(surface_info.scale_factor),
-            ..Default::default()
-        };
+    app.world_mut()
+        .spawn((window, handle_wrapper, handle_holder, PrimaryWindow));
 
-        app.world_mut()
-            .spawn((window, handle_wrapper, handle_holder, PrimaryWindow));
-
-        info!("Embedded Android window created successfully");
-    }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = surface_info; // Suppress unused variable warning
-    }
+    debug!("Embedded Android window created successfully");
 }
 
 // ============================================================================
-// Dummy android_main for compatibility
+// Embedded Android Asset Reader
 // ============================================================================
 
-/// Dummy android_main to satisfy linker expectations
-/// We don't actually use NativeActivity - we use JNI instead
+/// Custom AssetReader for embedded Android contexts that uses AssetManager directly
+/// without requiring ANDROID_APP
+pub struct EmbeddedAndroidAssetReader {
+    asset_manager: Arc<ndk::asset::AssetManager>,
+}
+
+impl EmbeddedAndroidAssetReader {
+    /// Create a new reader from an AssetManager pointer
+    ///
+    /// # Safety
+    /// The asset_manager_ptr must be a valid AAssetManager pointer that will remain
+    /// valid for the lifetime of this reader
+    pub unsafe fn new(asset_manager_ptr: *mut ndk_sys::AAssetManager) -> Self {
+        let asset_manager = unsafe {
+            ndk::asset::AssetManager::from_ptr(
+                NonNull::new(asset_manager_ptr).expect("AssetManager pointer is null"),
+            )
+        };
+        Self {
+            asset_manager: Arc::new(asset_manager),
+        }
+    }
+}
+
+impl AssetReader for EmbeddedAndroidAssetReader {
+    async fn read<'a>(
+        &'a self,
+        path: &'a std::path::Path,
+    ) -> Result<Box<dyn Reader + 'a>, AssetReaderError> {
+        let path_cstr = CString::new(path.to_str().unwrap())
+            .map_err(|_| AssetReaderError::NotFound(path.to_path_buf()))?;
+
+        let mut opened_asset = self
+            .asset_manager
+            .open(&path_cstr)
+            .ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
+
+        let bytes = opened_asset
+            .buffer()
+            .map_err(|e| AssetReaderError::Io(Arc::new(e)))?;
+
+        let reader = VecReader::new(bytes.to_vec());
+        Ok(Box::new(reader))
+    }
+
+    async fn read_meta<'a>(
+        &'a self,
+        path: &'a std::path::Path,
+    ) -> Result<Box<dyn Reader + 'a>, AssetReaderError> {
+        // Construct meta path manually (path + ".meta")
+        let mut meta_path = path.to_path_buf();
+        let mut extension = meta_path
+            .extension()
+            .map(|e| e.to_os_string())
+            .unwrap_or_default();
+        extension.push(".meta");
+        meta_path.set_extension(extension);
+        let path_cstr = CString::new(meta_path.to_str().unwrap())
+            .map_err(|_| AssetReaderError::NotFound(meta_path.clone()))?;
+
+        let mut opened_asset = self
+            .asset_manager
+            .open(&path_cstr)
+            .ok_or(AssetReaderError::NotFound(meta_path))?;
+
+        let bytes = opened_asset
+            .buffer()
+            .map_err(|e| AssetReaderError::Io(Arc::new(e)))?;
+
+        let reader = VecReader::new(bytes.to_vec());
+        Ok(Box::new(reader))
+    }
+
+    async fn read_directory<'a>(
+        &'a self,
+        path: &'a std::path::Path,
+    ) -> Result<Box<PathStream>, AssetReaderError> {
+        let path_cstr = CString::new(path.to_str().unwrap())
+            .map_err(|_| AssetReaderError::NotFound(path.to_path_buf()))?;
+
+        let opened_assets_dir = self
+            .asset_manager
+            .open_dir(&path_cstr)
+            .ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
+
+        let mapped_stream: Vec<_> = opened_assets_dir
+            .filter_map(move |f| {
+                let file_path = path.join(std::path::Path::new(f.to_str().unwrap()));
+                // Filter out meta files as they are not considered assets
+                if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+                    if ext.eq_ignore_ascii_case("meta") {
+                        return None;
+                    }
+                }
+                Some(file_path.to_owned())
+            })
+            .collect();
+
+        let read_dir: Box<PathStream> = Box::new(stream::iter(mapped_stream));
+        Ok(read_dir)
+    }
+
+    async fn is_directory<'a>(
+        &'a self,
+        path: &'a std::path::Path,
+    ) -> Result<bool, AssetReaderError> {
+        let cpath = CString::new(path.to_str().unwrap())
+            .map_err(|_| AssetReaderError::NotFound(path.to_path_buf()))?;
+
+        // Check if path exists as a directory
+        let _ = self
+            .asset_manager
+            .open_dir(&cpath)
+            .ok_or(AssetReaderError::NotFound(path.to_path_buf()))?;
+
+        // If open (as file) fails, it's a directory
+        Ok(self.asset_manager.open(&cpath).is_none())
+    }
+}
+
+/// Global storage for the embedded asset reader
+static EMBEDDED_ASSET_READER: OnceLock<EmbeddedAndroidAssetReader> = OnceLock::new();
+
+/// Initialize the embedded asset reader with the given AssetManager
+///
+/// # Safety
+/// The asset_manager_ptr must be a valid AAssetManager pointer
+pub unsafe fn init_embedded_asset_reader(asset_manager_ptr: *mut ndk_sys::AAssetManager) {
+    let reader = unsafe { EmbeddedAndroidAssetReader::new(asset_manager_ptr) };
+    let _ = EMBEDDED_ASSET_READER.set(reader);
+}
+
+/// Get the embedded asset reader, if initialized
+pub fn get_embedded_asset_reader() -> Option<&'static EmbeddedAndroidAssetReader> {
+    EMBEDDED_ASSET_READER.get()
+}
+
+/// Configure the Bevy app to use the embedded Android asset reader
+///
+/// **IMPORTANT**: Call this BEFORE adding AssetPlugin/DefaultPlugins to your app!
+///
+/// This function replaces the default Android asset reader with our custom
+/// embedded reader that works in embedded widget contexts.
+///
+/// # Example
+/// ```ignore
+/// use bevy::prelude::*;
+/// use bevy_embedded::android::configure_embedded_asset_source;
+///
+/// #[no_mangle]
+/// pub extern "C" fn bevy_embedded_create_app() -> *mut App {
+///     let mut app = App::new();
+///
+///     // MUST be called before DefaultPlugins!
+///     #[cfg(target_os = "android")]
+///     configure_embedded_asset_source(&mut app);
+///
+///     app.add_plugins(DefaultPlugins);
+///     // ... rest of app setup
+///
+///     Box::into_raw(Box::new(app))
+/// }
+/// ```
 #[cfg(target_os = "android")]
+pub fn configure_embedded_asset_source(app: &mut App) {
+    // Get the embedded asset reader
+    let reader = get_embedded_asset_reader()
+        .expect("Embedded asset reader must be initialized before configuring Bevy app");
+
+    // Clone the Arc so we can share it with the closure
+    let asset_manager = reader.asset_manager.clone();
+
+    // Create a custom asset source that uses our embedded reader
+    let source = AssetSourceBuilder::default().with_reader(move || {
+        Box::new(EmbeddedAndroidAssetReader {
+            asset_manager: asset_manager.clone(),
+        })
+    });
+
+    // Register it as the default source using the proper API
+    app.register_asset_source(AssetSourceId::Default, source);
+}
+
+// ============================================================================
+// android_main entry point
+// ============================================================================
+
+/// android_main entry point - called by android-activity crate
+/// This initializes the ANDROID_APP global so Bevy's asset system works
 #[unsafe(no_mangle)]
-pub extern "C" fn android_main(_app: *mut std::ffi::c_void) {
-    // This should never be called since we use JNI, not NativeActivity
-    panic!("android_main should not be called - using JNI interface instead");
+fn android_main(android_app: bevy::android::android_activity::AndroidApp) {
+    // Set ANDROID_APP for Bevy's asset system
+    let _ = bevy::android::ANDROID_APP.set(android_app);
+    info!("android_main: Initialized ANDROID_APP for Bevy asset system");
+
+    // We don't run the app here - that happens via JNI calls
+    // Just keep the activity alive
+    info!("android_main: Activity initialized, waiting for JNI calls...");
 }
 
 // ============================================================================
 // JNI Entry Points
 // ============================================================================
 
-#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeCreateApp(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
+    activity: JObject,
     surface: JObject,
     width: jint,
     height: jint,
     scale_factor: jfloat,
 ) -> jlong {
-    use std::ffi::c_void;
+    debug!(
+        "nativeCreateApp called: {}x{} @ {}x",
+        width, height, scale_factor
+    );
 
-    info!("nativeCreateApp called: {}x{} @ {}x", width, height, scale_factor);
+    // Get AssetManager from Activity
+    let asset_manager_ptr = unsafe {
+        let assets_obj = env
+            .call_method(
+                &activity,
+                "getAssets",
+                "()Landroid/content/res/AssetManager;",
+                &[],
+            )
+            .expect("Failed to get AssetManager")
+            .l()
+            .expect("AssetManager is null");
+        ndk_sys::AAssetManager_fromJava(env.get_raw(), assets_obj.as_raw())
+    };
 
-    // Initialize ndk-context with the JNI environment
-    unsafe {
-        let vm = env.get_java_vm().unwrap().get_java_vm_pointer() as *mut std::ffi::c_void;
-        let activity = _class.as_raw() as *mut std::ffi::c_void;
-        ndk_context::initialize_android_context(vm, activity);
+    if asset_manager_ptr.is_null() {
+        error!("Failed to get AssetManager from Activity");
+        return 0;
+    } else {
+        debug!("Got AssetManager: {:p}", asset_manager_ptr);
     }
+
+    // Initialize ndk-context for JNI calls
+    unsafe {
+        let vm = env.get_java_vm().unwrap().get_java_vm_pointer() as *mut c_void;
+        let activity_ptr = activity.as_raw() as *mut c_void;
+        ndk_context::initialize_android_context(vm, activity_ptr);
+    }
+
+    // Initialize our custom embedded asset reader
+    unsafe {
+        init_embedded_asset_reader(asset_manager_ptr);
+    }
+    debug!("Initialized embedded asset reader");
 
     // Get ANativeWindow from Surface
     let native_window_ptr = unsafe {
@@ -190,11 +413,11 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeCreateApp(
     };
 
     if native_window_ptr.is_null() {
-        info!("Failed to get native window from surface");
+        error!("Failed to get native window from surface");
         return 0;
     }
 
-    info!("Got native window pointer: {:?}", native_window_ptr);
+    debug!("Got native window pointer: {:p}", native_window_ptr);
 
     // Store surface info globally so create_window_from_host can access it
     set_android_surface(AndroidSurfaceInfo {
@@ -212,15 +435,14 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeCreateApp(
     let app_ptr = unsafe { bevy_embedded_create_app() };
 
     if app_ptr.is_null() {
-        info!("Failed to create Bevy app");
+        error!("Failed to create Bevy app");
         return 0;
     }
 
-    info!("Bevy app created successfully: {:?}", app_ptr);
+    debug!("Bevy app created successfully: {:p}", app_ptr);
     app_ptr as jlong
 }
 
-#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeUpdate(
     _env: JNIEnv,
@@ -240,7 +462,6 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeUpdate(
     }
 }
 
-#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeDestroy(
     _env: JNIEnv,
@@ -251,7 +472,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeDestroy(
         return;
     }
 
-    info!("Destroying Bevy app");
+    debug!("Destroying Bevy app");
 
     unsafe extern "C" {
         fn bevy_embedded_destroy(app: *mut App);
@@ -261,10 +482,9 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeDestroy(
         bevy_embedded_destroy(app_ptr as *mut App);
     }
 
-    info!("Bevy app destroyed");
+    debug!("Bevy app destroyed");
 }
 
-#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeTouchEvent(
     _env: JNIEnv,
@@ -284,7 +504,9 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeTouchEvent(
         let app_ref = &mut *app;
 
         if let Some(touch_phase) = crate::TouchPhase::from_u8(phase as u8) {
-            let mut input_events = app_ref.world_mut().resource_mut::<crate::EmbeddedInputEvents>();
+            let mut input_events = app_ref
+                .world_mut()
+                .resource_mut::<crate::EmbeddedInputEvents>();
             input_events.add_touch_event(crate::EmbeddedTouchEvent {
                 phase: touch_phase,
                 position: Vec2::new(x as f32, y as f32),
@@ -294,7 +516,6 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeTouchEvent(
     }
 }
 
-#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeResize(
     _env: JNIEnv,
@@ -309,7 +530,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeResize(
         return;
     }
 
-    info!(
+    debug!(
         "Android resize: {}x{} @ {}x scale",
         width, height, scale_factor
     );
@@ -326,7 +547,6 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeResize(
     }
 }
 
-#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeSendMessage(
     env: JNIEnv,
@@ -343,7 +563,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeSendMessage(
     let bytes = match env.convert_byte_array(data) {
         Ok(bytes) => bytes,
         Err(e) => {
-            info!("Failed to convert byte array: {:?}", e);
+            error!("Failed to convert byte array: {:?}", e);
             return;
         }
     };
@@ -356,7 +576,6 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeSendMessage(
     }
 }
 
-#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeReceiveMessage(
     env: JNIEnv,
@@ -376,7 +595,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeReceiveMessage(
                 match env.byte_array_from_slice(&message) {
                     Ok(array) => return array.into_raw(),
                     Err(e) => {
-                        info!("Failed to create byte array: {:?}", e);
+                        error!("Failed to create byte array: {:?}", e);
                     }
                 }
             }

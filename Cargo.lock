@@ -651,6 +651,7 @@ dependencies = [
  "bevy",
  "block2 0.6.2",
  "crossbeam-channel",
+ "futures-lite",
  "jni",
  "log",
  "ndk 0.9.0",
