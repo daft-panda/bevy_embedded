@@ -5,6 +5,24 @@
 //! the `EmbeddedApp` trait and use the `export_embedded_app!` macro.
 
 use bevy::app::App;
+use std::sync::Mutex;
+
+/// Stores the last error that occurred in the embedded app
+static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+/// Store an error message from the error handler
+#[doc(hidden)]
+pub fn store_error(message: String) {
+    if let Ok(mut last_error) = LAST_ERROR.lock() {
+        *last_error = Some(message);
+    }
+}
+
+/// Retrieve and clear the last error message
+#[doc(hidden)]
+pub fn take_last_error() -> Option<String> {
+    LAST_ERROR.lock().ok().and_then(|mut e| e.take())
+}
 
 /// Trait for defining an embedded Bevy application
 ///
@@ -87,6 +105,15 @@ macro_rules! export_embedded_app {
 
             let mut app = App::new();
 
+            // Set error handler to capture errors from Bevy systems
+            app.set_error_handler(|error, context| {
+                use std::fmt::Write;
+                let mut message = String::new();
+                let _ = write!(message, "{}: {}", context, error);
+                $crate::store_error(message);
+                bevy::log::error!("{}: {}", context, error);
+            });
+
             // Add the EmbeddedPlugin first so it can create the window before RenderPlugin builds
             app.add_plugins($crate::EmbeddedPlugin);
 
@@ -115,33 +142,77 @@ macro_rules! export_embedded_app {
         }
 
         /// Update the app (called every frame by host)
+        /// Returns 0 on success, non-zero error code if the app should exit with an error
         #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn bevy_embedded_update(app: *mut bevy::app::App) {
+        pub unsafe extern "C" fn bevy_embedded_update(app: *mut bevy::app::App) -> u8 {
             use bevy::app::PluginsState;
-            use bevy::platform::time::Instant;
             use bevy::tasks::tick_global_task_pools_on_main_thread;
-            use bevy::time::{TimeSender, TimeUpdateStrategy};
 
-            if !app.is_null() {
-                unsafe {
-                    let app = &mut *app;
+            if app.is_null() {
+                $crate::store_error("Null app pointer".to_string());
+                return 1;
+            }
 
-                    let plugins_state = app.plugins_state();
-                    if plugins_state != PluginsState::Cleaned {
-                        while app.plugins_state() == PluginsState::Adding {
-                            tick_global_task_pools_on_main_thread();
+            unsafe {
+                let app = &mut *app;
+
+                let plugins_state = app.plugins_state();
+                if plugins_state != PluginsState::Cleaned {
+                    while app.plugins_state() == PluginsState::Adding {
+                        tick_global_task_pools_on_main_thread();
+                    }
+                    app.finish();
+                    app.cleanup();
+                }
+
+                // Update the app
+                app.update();
+
+                // Check if the app should exit (e.g., render thread crashed)
+                if let Some(exit) = app.should_exit() {
+                    if exit.is_error() {
+                        // If we don't have a stored error message, create a generic one
+                        if $crate::take_last_error().is_none() {
+                            $crate::store_error("Bevy app exited with an error".to_string());
                         }
-                        app.finish();
-                        app.cleanup();
+                        bevy::log::error!("App exiting with error: {:?}", exit);
+                        return match exit {
+                            bevy::app::AppExit::Error(code) => code.get(),
+                            _ => 1,
+                        };
                     }
+                }
 
-                    // Send current time to render world if available
-                    let now = Instant::now();
-                    if let Some(time_sender) = app.world().get_resource::<TimeSender>() {
-                        let _ = time_sender.0.try_send(now);
-                    }
+                // Check if an error was stored during the update (without AppExit)
+                if $crate::take_last_error().is_some() {
+                    return 1;
+                }
 
-                    app.update();
+                0 // Success
+            }
+        }
+
+        /// Get the last error message (if any) and clear it
+        /// Returns a pointer to a C string, or null if no error
+        /// The caller is responsible for freeing the returned string with bevy_embedded_free_error
+        #[unsafe(no_mangle)]
+        pub extern "C" fn bevy_embedded_get_last_error() -> *mut std::os::raw::c_char {
+            use std::ffi::CString;
+
+            if let Some(error) = $crate::take_last_error() {
+                if let Ok(c_string) = CString::new(error) {
+                    return c_string.into_raw();
+                }
+            }
+            std::ptr::null_mut()
+        }
+
+        /// Free an error string returned by bevy_embedded_get_last_error
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn bevy_embedded_free_error(error: *mut std::os::raw::c_char) {
+            if !error.is_null() {
+                unsafe {
+                    let _ = std::ffi::CString::from_raw(error);
                 }
             }
         }

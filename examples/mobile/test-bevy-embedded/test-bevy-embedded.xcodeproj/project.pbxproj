@@ -7,9 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C042927D2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = C042927C2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib */; };
+		C042927E2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = C042927C2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C042EB392EBAADD000CD02B8 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C042EB382EBAADD000CD02B8 /* AudioToolbox.framework */; };
-		C0D156032EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = C0D156022EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib */; };
-		C0D156042EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = C0D156022EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C0F24CB52EBBDA4900439A98 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C0F24CB32EBBDA4900439A98 /* Metal.framework */; };
 		C0F24CB62EBBDA4900439A98 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C0F24CB42EBBDA4900439A98 /* MetalKit.framework */; };
 		C0F24CB82EBBDA4F00439A98 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C0F24CB72EBBDA4F00439A98 /* UIKit.framework */; };
@@ -40,7 +40,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				C0D156042EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib in Embed Libraries */,
+				C042927E2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib in Embed Libraries */,
 			);
 			name = "Embed Libraries";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -51,8 +51,8 @@
 		C03A20052EBA98CD006472A2 /* test-bevy-embedded.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "test-bevy-embedded.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C03A20122EBA98CF006472A2 /* test-bevy-embeddedTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "test-bevy-embeddedTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C03A201C2EBA98CF006472A2 /* test-bevy-embeddedUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "test-bevy-embeddedUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C042927C2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libbevy_mobile_embedded_example.dylib; path = "../../../../../Library/Developer/Xcode/DerivedData/test-bevy-embedded-bsungmtnuduzwrcwutludbouuzbk/Index.noindex/Build/Products/Debug-iphonesimulator/libbevy_mobile_embedded_example.dylib"; sourceTree = "<group>"; };
 		C042EB382EBAADD000CD02B8 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
-		C0D156022EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libbevy_mobile_embedded_example.dylib; path = "../../../../../Library/Developer/Xcode/DerivedData/test-bevy-embedded-bsungmtnuduzwrcwutludbouuzbk/Build/Products/Debug-iphoneos/libbevy_mobile_embedded_example.dylib"; sourceTree = "<group>"; };
 		C0F24CB32EBBDA4900439A98 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		C0F24CB42EBBDA4900439A98 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		C0F24CB72EBBDA4F00439A98 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
@@ -98,7 +98,7 @@
 				C0F24CBA2EBBDA5600439A98 /* QuartzCore.framework in Frameworks */,
 				C0F24CB82EBBDA4F00439A98 /* UIKit.framework in Frameworks */,
 				C0F24CB52EBBDA4900439A98 /* Metal.framework in Frameworks */,
-				C0D156032EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib in Frameworks */,
+				C042927D2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib in Frameworks */,
 				C0F24CB62EBBDA4900439A98 /* MetalKit.framework in Frameworks */,
 				C042EB392EBAADD000CD02B8 /* AudioToolbox.framework in Frameworks */,
 			);
@@ -145,7 +145,7 @@
 		C042EB372EBAADD000CD02B8 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				C0D156022EBC0B430089A1CF /* libbevy_mobile_embedded_example.dylib */,
+				C042927C2EC0BFB3005CFE8C /* libbevy_mobile_embedded_example.dylib */,
 				C0F24CB92EBBDA5600439A98 /* QuartzCore.framework */,
 				C0F24CB72EBBDA4F00439A98 /* UIKit.framework */,
 				C0F24CB32EBBDA4900439A98 /* Metal.framework */,

@@ -448,17 +448,49 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeUpdate(
     _env: JNIEnv,
     _class: JClass,
     app_ptr: jlong,
-) {
+) -> jint {
     if app_ptr == 0 {
-        return;
+        return 1; // Error: null app pointer
     }
 
     unsafe extern "C" {
-        fn bevy_embedded_update(app: *mut App);
+        fn bevy_embedded_update(app: *mut App) -> u8;
+    }
+
+    unsafe { bevy_embedded_update(app_ptr as *mut App) as jint }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeGetLastError<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass,
+) -> JObject<'local> {
+    use std::ffi::CStr;
+
+    unsafe extern "C" {
+        fn bevy_embedded_get_last_error() -> *mut std::os::raw::c_char;
+        fn bevy_embedded_free_error(error: *mut std::os::raw::c_char);
     }
 
     unsafe {
-        bevy_embedded_update(app_ptr as *mut App);
+        let error_ptr = bevy_embedded_get_last_error();
+        if error_ptr.is_null() {
+            return JObject::null();
+        }
+
+        let error_cstr = CStr::from_ptr(error_ptr);
+        let error_str = error_cstr
+            .to_str()
+            .unwrap_or("Invalid UTF-8 in error message");
+
+        // Convert to Java String and return
+        let result = match env.new_string(error_str) {
+            Ok(jstring) => jstring.into(),
+            Err(_) => JObject::null(),
+        };
+
+        bevy_embedded_free_error(error_ptr);
+        result
     }
 }
 

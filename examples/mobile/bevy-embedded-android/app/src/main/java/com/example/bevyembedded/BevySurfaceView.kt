@@ -36,6 +36,7 @@ class BevySurfaceView
         private val choreographer = Choreographer.getInstance()
 
         var onMessageReceived: ((ByteArray) -> Unit)? = null
+        var onError: ((String) -> Unit)? = null
         private val scaleFactor: Float = context.resources.displayMetrics.density
 
         init {
@@ -113,8 +114,23 @@ class BevySurfaceView
                     }
 
                     try {
-                        // Update Bevy (renders one frame)
-                        BevyNative.nativeUpdate(bevyAppPtr)
+                        // Update Bevy (renders one frame) - returns 0 on success
+                        val errorCode = BevyNative.nativeUpdate(bevyAppPtr)
+
+                        if (errorCode != 0) {
+                            // Get the error message
+                            val errorMessage = BevyNative.nativeGetLastError()
+                                ?: "Bevy error (code: $errorCode)"
+
+                            Log.e(TAG, "Bevy error: $errorMessage")
+
+                            // Call error handler and stop rendering
+                            onError?.invoke(errorMessage)
+
+                            // Stop the render loop
+                            stopBevy()
+                            return
+                        }
 
                         // Poll for messages from Bevy
                         pollBevyMessages()

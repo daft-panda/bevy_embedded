@@ -32,7 +32,13 @@ func bevyEmbeddedGetSurface(_ out: UnsafeMutablePointer<EmbeddedSurfaceInfo>) {
 func bevyEmbeddedCreateApp() -> UnsafeMutableRawPointer?
 
 @_silgen_name("bevy_embedded_update")
-func bevyEmbeddedUpdate(_ app: UnsafeMutableRawPointer)
+func bevyEmbeddedUpdate(_ app: UnsafeMutableRawPointer) -> UInt8
+
+@_silgen_name("bevy_embedded_get_last_error")
+func bevyEmbeddedGetLastError() -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("bevy_embedded_free_error")
+func bevyEmbeddedFreeError(_ error: UnsafeMutablePointer<CChar>)
 
 @_silgen_name("bevy_embedded_destroy")
 func bevyEmbeddedDestroy(_ app: UnsafeMutableRawPointer)
@@ -82,6 +88,7 @@ class BevyViewController {
 class BevyMetalViewCoordinator: NSObject, MTKViewDelegate {
     var bevyApp: UnsafeMutableRawPointer?
     var onMessageReceived: ((Data) -> Void)?
+    var onError: ((String) -> Void)?
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         guard let app = bevyApp else { return }
@@ -91,7 +98,32 @@ class BevyMetalViewCoordinator: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         guard let app = bevyApp else { return }
-        bevyEmbeddedUpdate(app)
+
+        // Update Bevy - returns 0 on success, error code otherwise
+        let errorCode = bevyEmbeddedUpdate(app)
+
+        if errorCode != 0 {
+            // Get the error message
+            var errorMessage = "Bevy error (code: \(errorCode))"
+            if let errorPtr = bevyEmbeddedGetLastError() {
+                errorMessage = String(cString: errorPtr)
+                bevyEmbeddedFreeError(errorPtr)
+            }
+
+            // Call error handler and stop rendering
+            if let errorHandler = onError {
+                DispatchQueue.main.async {
+                    errorHandler(errorMessage)
+                }
+            } else {
+                print("Bevy error: \(errorMessage)")
+            }
+
+            // Clear the app pointer to stop further updates
+            bevyEmbeddedDestroy(app)
+            bevyApp = nil
+            return
+        }
 
         // Poll for messages from Bevy
         pollBevyMessages()

@@ -28,8 +28,15 @@ object BevyNative {
     /**
      * Update the Bevy app (render one frame)
      * @param appPtr Pointer to the Bevy app instance
+     * @return Error code (0 = success, non-zero = error)
      */
-    external fun nativeUpdate(appPtr: Long)
+    external fun nativeUpdate(appPtr: Long): Int
+
+    /**
+     * Get the last error message from Bevy (if any)
+     * @return Error message string, or null if no error
+     */
+    external fun nativeGetLastError(): String?
 
     /**
      * Destroy the Bevy app instance and free resources
