@@ -84,7 +84,14 @@ class BevySurfaceView
             Log.d(TAG, "Setting up Bevy...")
 
             try {
-                bevyAppPtr = BevyNative.nativeCreateApp(surface, width, height, scaleFactor)
+                // Get the Activity from context
+                val activity = context as? android.app.Activity
+                if (activity == null) {
+                    Log.e(TAG, "Context is not an Activity - cannot initialize Bevy")
+                    return
+                }
+
+                bevyAppPtr = BevyNative.nativeCreateApp(activity, surface, width, height, scaleFactor)
 
                 if (bevyAppPtr != 0L) {
                     Log.d(TAG, "Bevy app created successfully: $bevyAppPtr")

@@ -12,6 +12,7 @@ object BevyNative {
 
     /**
      * Create a new Bevy app instance
+     * @param activity The Android Activity context (for accessing AssetManager)
      * @param surface The Android Surface to render to
      * @param width Surface width in pixels
      * @param height Surface height in pixels
@@ -19,6 +20,7 @@ object BevyNative {
      * @return Pointer to the Bevy app instance
      */
     external fun nativeCreateApp(
+        activity: android.app.Activity,
         surface: Surface,
         width: Int,
         height: Int,
