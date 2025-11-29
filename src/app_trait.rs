@@ -74,6 +74,8 @@ pub trait EmbeddedApp {
 /// - `bevy_embedded_update()` - Updates the app each frame
 /// - `bevy_embedded_destroy()` - Cleans up and destroys the app
 ///
+/// For WASM targets, this generates wasm-bindgen compatible entry points instead.
+///
 /// # Example
 ///
 /// ```no_run
@@ -92,6 +94,8 @@ pub trait EmbeddedApp {
 #[macro_export]
 macro_rules! export_embedded_app {
     ($app_type:ty) => {
+        // Native (iOS/Android) implementation
+        #[cfg(not(target_arch = "wasm32"))]
         /// Entry point that creates and returns the Bevy App
         /// This is called AFTER the host has set up the surface info
         #[unsafe(no_mangle)]
@@ -141,6 +145,7 @@ macro_rules! export_embedded_app {
             Box::into_raw(Box::new(app))
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         /// Update the app (called every frame by host)
         /// Returns 0 on success, non-zero error code if the app should exit with an error
         #[unsafe(no_mangle)]
@@ -192,6 +197,7 @@ macro_rules! export_embedded_app {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         /// Get the last error message (if any) and clear it
         /// Returns a pointer to a C string, or null if no error
         /// The caller is responsible for freeing the returned string with bevy_embedded_free_error
@@ -207,6 +213,7 @@ macro_rules! export_embedded_app {
             std::ptr::null_mut()
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         /// Free an error string returned by bevy_embedded_get_last_error
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn bevy_embedded_free_error(error: *mut std::os::raw::c_char) {
@@ -217,6 +224,7 @@ macro_rules! export_embedded_app {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         /// Cleanup and destroy the app
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn bevy_embedded_destroy(app: *mut bevy::app::App) {
@@ -225,6 +233,43 @@ macro_rules! export_embedded_app {
                     let _ = Box::from_raw(app);
                 }
             }
+        }
+
+        // WASM implementation
+        #[cfg(target_arch = "wasm32")]
+        /// Create the Bevy app for WASM
+        /// width and height are the initial canvas dimensions
+        #[wasm_bindgen::prelude::wasm_bindgen]
+        pub fn bevy_embedded_create_app(width: u32, height: u32) {
+            use bevy::app::App;
+            use $crate::EmbeddedApp;
+
+            // Call pre-init hook
+            <$app_type>::pre_init();
+
+            let mut app = App::new();
+
+            // Add the EmbeddedPlugin first
+            app.add_plugins($crate::EmbeddedPlugin);
+
+            // Insert the WASM host channel
+            app.insert_resource($crate::wasm::WasmHostChannel);
+
+            // Create the window with the provided dimensions
+            $crate::wasm::create_window_from_host(&mut app, width, height);
+
+            // Call post-init hook
+            <$app_type>::post_init(&mut app);
+
+            // User-defined setup
+            <$app_type>::setup(&mut app);
+
+            // Finish and cleanup to initialize all plugins
+            app.finish();
+            app.cleanup();
+
+            // Store the app for later updates
+            $crate::wasm::store_app(app);
         }
     };
 }

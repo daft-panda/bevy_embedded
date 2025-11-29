@@ -1,15 +1,15 @@
 [package]
 name = "bevy_embedded"
-version = "0.17.2"
+version = "0.17.3"
 edition = "2024"
 description = "Embedded widget support for Bevy Engine"
 homepage = "https://bevyengine.org"
 repository = "https://github.com/bevyengine/bevy"
 license = "MIT OR Apache-2.0"
-keywords = ["bevy", "embedded", "widget", "ios", "android"]
+keywords = ["bevy", "embedded", "widget", "ios", "android", "wasm"]
 
 [dependencies]
-bevy = { version = "0.17.2", default-features = false, features = ["std", "bevy_render"]}
+bevy = { version = "0.17.2", default-features = false, features = ["std", "bevy_render", "bevy_asset"]}
 raw-window-handle = "0.6"
 crossbeam-channel = "0.5"
 log = "0.4"
@@ -32,3 +32,7 @@ ndk = "0.9"
 ndk-sys = "0.6"
 ndk-context = "0.1.1"
 futures-lite = "2.6"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement"] }
