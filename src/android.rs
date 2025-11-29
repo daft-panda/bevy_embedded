@@ -357,7 +357,7 @@ fn android_main(android_app: bevy::android::android_activity::AndroidApp) {
 // ============================================================================
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeCreateApp(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeCreateApp(
     mut env: JNIEnv,
     _class: JClass,
     activity: JObject,
@@ -444,7 +444,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeCreateApp(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeUpdate(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeUpdate(
     _env: JNIEnv,
     _class: JClass,
     app_ptr: jlong,
@@ -461,7 +461,9 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeUpdate(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeGetLastError<'local>(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeGetLastError<
+    'local,
+>(
     mut env: JNIEnv<'local>,
     _class: JClass,
 ) -> JObject<'local> {
@@ -495,7 +497,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeGetLastError<'l
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeDestroy(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeDestroy(
     _env: JNIEnv,
     _class: JClass,
     app_ptr: jlong,
@@ -518,7 +520,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeDestroy(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeTouchEvent(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeTouchEvent(
     _env: JNIEnv,
     _class: JClass,
     app_ptr: jlong,
@@ -549,7 +551,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeTouchEvent(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeResize(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeResize(
     _env: JNIEnv,
     _class: JClass,
     app_ptr: jlong,
@@ -580,7 +582,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeResize(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeSendMessage(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeSendMessage(
     env: JNIEnv,
     _class: JClass,
     app_ptr: jlong,
@@ -609,7 +611,7 @@ pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeSendMessage(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn Java_com_example_bevyembedded_BevyNative_nativeReceiveMessage(
+pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeReceiveMessage(
     env: JNIEnv,
     _class: JClass,
     app_ptr: jlong,
