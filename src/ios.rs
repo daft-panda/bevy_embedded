@@ -5,7 +5,6 @@
 #![allow(unsafe_code)]
 
 use bevy::app::App;
-use bevy::ecs::query::With;
 use bevy::math::Vec2;
 use bevy::window::{
     PrimaryWindow, RawHandleWrapper, RawHandleWrapperHolder, Window, WindowResolution,
@@ -19,7 +18,8 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
-use crate::{EmbeddedInputEvents, EmbeddedTouchEvent, HostChannel, TouchPhase};
+use crate::host_interface::{HostInterface, SurfaceInfo};
+use crate::{EmbeddedInputEvents, EmbeddedTouchEvent, TouchPhase};
 
 /// Wrapper for the UIView that implements the required traits
 struct MetalViewWrapper {
@@ -50,48 +50,40 @@ impl HasDisplayHandle for MetalViewWrapper {
     }
 }
 
-/// Surface info returned from the host app
-#[repr(C)]
-pub struct EmbeddedSurfaceInfo {
-    pub ui_view: *const c_void,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor: f32,
-}
-
-/// Called by EmbeddedPlugin during finish() to create the window
-/// This requests the native surface from the host application
-pub fn create_window_from_host(app: &mut App) {
-    // Call into Swift to get the surface info
-    unsafe extern "C" {
-        fn bevy_embedded_get_surface(out: *mut EmbeddedSurfaceInfo);
-    }
-
-    let mut surface_info = EmbeddedSurfaceInfo {
-        ui_view: std::ptr::null(),
-        width: 0,
-        height: 0,
-        scale_factor: 1.0,
+/// Called during app creation to create the window from the host interface
+pub fn create_window_from_host_with<H: HostInterface>(app: &mut App, host: &H) {
+    let Some(surface) = host.get_surface() else {
+        log::error!("Host did not provide a surface");
+        return;
     };
 
-    unsafe { bevy_embedded_get_surface(&mut surface_info) };
+    create_window_from_surface(app, surface);
+}
 
-    if surface_info.ui_view.is_null() {
-        log::error!("Host did not provide a valid surface");
+/// Called during app creation using the default ExternHostInterface
+pub fn create_window_from_host(app: &mut App) {
+    use crate::host_interface::ExternHostInterface;
+    create_window_from_host_with(app, &ExternHostInterface::new());
+}
+
+/// Create window from surface info
+pub fn create_window_from_surface(app: &mut App, surface: SurfaceInfo) {
+    if surface.view.is_null() {
+        log::error!("Host provided a null view pointer");
         return;
     }
 
     log::info!(
-        "Creating embedded window: {}x{} @ {}x scale",
-        surface_info.width,
-        surface_info.height,
-        surface_info.scale_factor
+        "Creating embedded iOS window: {}x{} @ {}x scale",
+        surface.width,
+        surface.height,
+        surface.scale_factor
     );
 
     // Create the view wrapper for raw-window-handle
     let view_wrapper = MetalViewWrapper {
         window_handle: unsafe {
-            UiKitWindowHandle::new(NonNull::new_unchecked(surface_info.ui_view as *mut _))
+            UiKitWindowHandle::new(NonNull::new_unchecked(surface.view as *mut _))
         },
         display_handle: UiKitDisplayHandle::new(),
     };
@@ -105,15 +97,15 @@ pub fn create_window_from_host(app: &mut App) {
 
     // Create the Window entity with the native surface
     let window = Window {
-        resolution: WindowResolution::new(surface_info.width, surface_info.height)
-            .with_scale_factor_override(surface_info.scale_factor),
+        resolution: WindowResolution::new(surface.width, surface.height)
+            .with_scale_factor_override(surface.scale_factor),
         ..Default::default()
     };
 
     app.world_mut()
         .spawn((window, handle_wrapper, handle_holder, PrimaryWindow));
 
-    log::info!("Embedded window created successfully");
+    log::info!("Embedded iOS window created successfully");
 }
 
 /// Handle a touch event from iOS
@@ -161,17 +153,8 @@ pub unsafe extern "C" fn bevy_embedded_ios_resize(
     if app.is_null() {
         return;
     }
-
     let app = &mut *(app as *mut App);
-
-    // Find the primary window and update its resolution
-    let mut query = app
-        .world_mut()
-        .query_filtered::<&mut Window, With<PrimaryWindow>>();
-    if let Ok(mut window) = query.single_mut(app.world_mut()) {
-        window.resolution.set_physical_resolution(width, height);
-        window.resolution.set_scale_factor(scale_factor);
-    }
+    crate::host_interface::resize_window(app, width, height, scale_factor);
 }
 
 /// Send a binary message to Bevy from the host
@@ -190,17 +173,9 @@ pub unsafe extern "C" fn bevy_embedded_ios_send_message(
     if app.is_null() || data.is_null() {
         return;
     }
-
-    let app = &mut *(app as *mut App);
-    let slice = std::slice::from_raw_parts(data, len);
-    let message = slice.to_vec();
-
-    // Check if the resource exists before accessing it
-    if let Some(channel) = app.world().get_resource::<HostChannel>() {
-        channel.send(message);
-    } else {
-        log::warn!("HostChannel resource not available");
-    }
+    let app = &*(app as *mut App);
+    let message = std::slice::from_raw_parts(data, len).to_vec();
+    crate::host_interface::send_message(app, message);
 }
 
 /// Receive a binary message from Bevy (non-blocking poll)
@@ -221,16 +196,12 @@ pub unsafe extern "C" fn bevy_embedded_ios_receive_message(
     if app.is_null() || buffer.is_null() || buffer_len == 0 {
         return 0;
     }
-
-    let app = &mut *(app as *mut App);
-
-    if let Some(channel) = app.world().get_resource::<HostChannel>() {
-        if let Some(message) = channel.receive() {
-            let copy_len = message.len().min(buffer_len);
-            std::ptr::copy_nonoverlapping(message.as_ptr(), buffer, copy_len);
-            return copy_len;
-        }
+    let app = &*(app as *mut App);
+    if let Some(message) = crate::host_interface::receive_message(app) {
+        let copy_len = message.len().min(buffer_len);
+        std::ptr::copy_nonoverlapping(message.as_ptr(), buffer, copy_len);
+        copy_len
+    } else {
+        0
     }
-
-    0
 }

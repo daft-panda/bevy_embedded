@@ -14,9 +14,13 @@
 
 #![warn(missing_docs)]
 
+/// Re-export bevy so consumers don't need to add it as a separate dependency
+pub use bevy;
+
 mod app_trait;
 mod channel;
 mod config;
+pub mod host_interface;
 mod input;
 mod plugin;
 

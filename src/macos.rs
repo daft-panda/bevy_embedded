@@ -8,7 +8,6 @@
 #![allow(unsafe_code)]
 
 use bevy::app::App;
-use bevy::ecs::query::With;
 use bevy::math::Vec2;
 use bevy::window::{
     PrimaryWindow, RawHandleWrapper, RawHandleWrapperHolder, Window, WindowResolution,
@@ -22,8 +21,8 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
-use crate::config::take_config;
-use crate::{EmbeddedInputEvents, EmbeddedTouchEvent, HostChannel, TouchPhase};
+use crate::host_interface::{HostInterface, SurfaceInfo};
+use crate::{EmbeddedInputEvents, EmbeddedTouchEvent, TouchPhase};
 
 /// Wrapper for the NSView that implements the required traits for raw-window-handle
 struct NSViewWrapper {
@@ -54,31 +53,40 @@ impl HasDisplayHandle for NSViewWrapper {
     }
 }
 
-/// Called during app creation to create the window from the stored config
-pub fn create_window_from_host(app: &mut App) {
-    let config = take_config();
-
-    let Some(config) = config else {
-        log::error!("No config available. Call bevy_embedded_set_config first.");
+/// Called during app creation to create the window from the host interface
+pub fn create_window_from_host_with<H: HostInterface>(app: &mut App, host: &H) {
+    let Some(surface) = host.get_surface() else {
+        log::error!("Host did not provide a surface");
         return;
     };
 
-    if config.view.is_null() {
+    create_window_from_surface(app, surface);
+}
+
+/// Called during app creation using the default ExternHostInterface
+pub fn create_window_from_host(app: &mut App) {
+    use crate::host_interface::ExternHostInterface;
+    create_window_from_host_with(app, &ExternHostInterface::new());
+}
+
+/// Create window from surface info
+pub fn create_window_from_surface(app: &mut App, surface: SurfaceInfo) {
+    if surface.view.is_null() {
         log::error!("Host provided a null view pointer");
         return;
     }
 
     log::info!(
         "Creating embedded macOS window: {}x{} @ {}x scale",
-        config.width,
-        config.height,
-        config.scale_factor
+        surface.width,
+        surface.height,
+        surface.scale_factor
     );
 
     // Create the view wrapper for raw-window-handle
     let view_wrapper = NSViewWrapper {
         window_handle: unsafe {
-            AppKitWindowHandle::new(NonNull::new_unchecked(config.view as *mut _))
+            AppKitWindowHandle::new(NonNull::new_unchecked(surface.view as *mut _))
         },
         display_handle: AppKitDisplayHandle::new(),
     };
@@ -92,8 +100,8 @@ pub fn create_window_from_host(app: &mut App) {
 
     // Create the Window entity with the native surface
     let window = Window {
-        resolution: WindowResolution::new(config.width, config.height)
-            .with_scale_factor_override(config.scale_factor),
+        resolution: WindowResolution::new(surface.width, surface.height)
+            .with_scale_factor_override(surface.scale_factor),
         ..Default::default()
     };
 
@@ -177,23 +185,8 @@ pub unsafe extern "C" fn bevy_embedded_macos_resize(
     if app.is_null() {
         return;
     }
-
     let app = &mut *(app as *mut App);
-
-    // Find the primary window and update its resolution
-    let mut query = app
-        .world_mut()
-        .query_filtered::<&mut Window, With<PrimaryWindow>>();
-    if let Ok(mut window) = query.single_mut(app.world_mut()) {
-        window.resolution.set_physical_resolution(width, height);
-        window.resolution.set_scale_factor(scale_factor);
-        log::debug!(
-            "macOS window resized to {}x{} @ {}x",
-            width,
-            height,
-            scale_factor
-        );
-    }
+    crate::host_interface::resize_window(app, width, height, scale_factor);
 }
 
 /// Send a binary message to Bevy from the host
@@ -212,16 +205,9 @@ pub unsafe extern "C" fn bevy_embedded_macos_send_message(
     if app.is_null() || data.is_null() {
         return;
     }
-
-    let app = &mut *(app as *mut App);
-    let slice = std::slice::from_raw_parts(data, len);
-    let message = slice.to_vec();
-
-    if let Some(channel) = app.world().get_resource::<HostChannel>() {
-        channel.send(message);
-    } else {
-        log::warn!("HostChannel resource not available");
-    }
+    let app = &*(app as *mut App);
+    let message = std::slice::from_raw_parts(data, len).to_vec();
+    crate::host_interface::send_message(app, message);
 }
 
 /// Receive a binary message from Bevy (non-blocking poll)
@@ -242,16 +228,12 @@ pub unsafe extern "C" fn bevy_embedded_macos_receive_message(
     if app.is_null() || buffer.is_null() || buffer_len == 0 {
         return 0;
     }
-
-    let app = &mut *(app as *mut App);
-
-    if let Some(channel) = app.world().get_resource::<HostChannel>() {
-        if let Some(message) = channel.receive() {
-            let copy_len = message.len().min(buffer_len);
-            std::ptr::copy_nonoverlapping(message.as_ptr(), buffer, copy_len);
-            return copy_len;
-        }
+    let app = &*(app as *mut App);
+    if let Some(message) = crate::host_interface::receive_message(app) {
+        let copy_len = message.len().min(buffer_len);
+        std::ptr::copy_nonoverlapping(message.as_ptr(), buffer, copy_len);
+        copy_len
+    } else {
+        0
     }
-
-    0
 }

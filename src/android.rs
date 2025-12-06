@@ -1,5 +1,5 @@
 //! Android-specific embedded integration with JNI functions
-use crate::HostChannel;
+use crate::host_interface::{HostInterface, SurfaceInfo};
 use bevy::{
     app::App,
     asset::{
@@ -96,7 +96,17 @@ impl HasDisplayHandle for AndroidWindowWrapper {
     }
 }
 
-/// Called by EmbeddedPlugin during finish() to create the window from Android surface
+/// Called during app creation to create the window from the host interface
+pub fn create_window_from_host_with<H: HostInterface>(app: &mut App, host: &H) {
+    let Some(surface) = host.get_surface() else {
+        error!("Host did not provide a surface");
+        return;
+    };
+
+    create_window_from_surface(app, surface);
+}
+
+/// Called during app creation using the stored Android surface
 pub fn create_window_from_host(app: &mut App) {
     let surface_info = match get_android_surface() {
         Some(info) => info,
@@ -106,19 +116,32 @@ pub fn create_window_from_host(app: &mut App) {
         }
     };
 
-    if surface_info.native_window.is_null() {
-        error!("Host did not provide a valid surface");
+    create_window_from_surface(
+        app,
+        SurfaceInfo {
+            view: surface_info.native_window,
+            width: surface_info.width,
+            height: surface_info.height,
+            scale_factor: surface_info.scale_factor,
+        },
+    );
+}
+
+/// Create window from surface info
+pub fn create_window_from_surface(app: &mut App, surface: SurfaceInfo) {
+    if surface.view.is_null() {
+        error!("Host provided a null surface pointer");
         return;
     }
 
     debug!(
         "Creating embedded Android window: {}x{} @ {}x scale",
-        surface_info.width, surface_info.height, surface_info.scale_factor
+        surface.width, surface.height, surface.scale_factor
     );
 
     // Create the window wrapper for raw-window-handle
     let window_handle = AndroidNdkWindowHandle::new(
-        NonNull::new(surface_info.native_window).expect("Native window pointer is null"),
+        NonNull::new(surface.view as *mut _).expect("Native window pointer is null"),
     );
 
     let display_handle = AndroidDisplayHandle::new();
@@ -137,8 +160,8 @@ pub fn create_window_from_host(app: &mut App) {
 
     // Create the Window entity with the native surface
     let window = Window {
-        resolution: WindowResolution::new(surface_info.width, surface_info.height)
-            .with_scale_factor_override(surface_info.scale_factor),
+        resolution: WindowResolution::new(surface.width, surface.height)
+            .with_scale_factor_override(surface.scale_factor),
         ..Default::default()
     };
 
@@ -563,21 +586,8 @@ pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeRe
     if app.is_null() {
         return;
     }
-
-    debug!(
-        "Android resize: {}x{} @ {}x scale",
-        width, height, scale_factor
-    );
-
     unsafe {
-        if let Some(mut world) = (*app).world_mut().into() {
-            if let Some(mut window) = world.query::<&mut Window>().iter_mut(&mut world).next() {
-                window.resolution.set(width as f32, height as f32);
-                window
-                    .resolution
-                    .set_scale_factor_override(Some(scale_factor));
-            }
-        }
+        crate::host_interface::resize_window(&mut *app, width as u32, height as u32, scale_factor);
     }
 }
 
@@ -593,7 +603,6 @@ pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeSe
         return;
     }
 
-    // Convert Java byte array to Rust Vec<u8>
     let bytes = match env.convert_byte_array(data) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -603,10 +612,7 @@ pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeSe
     };
 
     unsafe {
-        let app_ref = &mut *app;
-        if let Some(channel) = app_ref.world().get_resource::<HostChannel>() {
-            channel.send(bytes);
-        }
+        crate::host_interface::send_message(&*app, bytes);
     }
 }
 
@@ -622,15 +628,11 @@ pub extern "C" fn Java_com_github_daft_1panda_bevy_1embedded_BevyNative_nativeRe
     }
 
     unsafe {
-        let app_ref = &mut *app;
-        if let Some(channel) = app_ref.world().get_resource::<HostChannel>() {
-            if let Some(message) = channel.receive() {
-                // Convert Rust Vec<u8> to Java byte array
-                match env.byte_array_from_slice(&message) {
-                    Ok(array) => return array.into_raw(),
-                    Err(e) => {
-                        error!("Failed to create byte array: {:?}", e);
-                    }
+        if let Some(message) = crate::host_interface::receive_message(&*app) {
+            match env.byte_array_from_slice(&message) {
+                Ok(array) => return array.into_raw(),
+                Err(e) => {
+                    error!("Failed to create byte array: {:?}", e);
                 }
             }
         }
