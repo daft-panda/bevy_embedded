@@ -10,6 +10,29 @@ use std::sync::Mutex;
 /// Stores the last error that occurred in the embedded app
 static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
+/// Configure the asset path for the embedded app.
+/// This should be called before adding plugins that use assets.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn configure_asset_path(app: &mut App) {
+    use bevy::asset::io::{AssetSource, AssetSourceId};
+    use bevy::asset::AssetApp;
+    use std::path::PathBuf;
+
+    if let Some(asset_path) = crate::config::get_asset_path() {
+        log::info!("Configuring asset path: {}", asset_path);
+
+        let path = PathBuf::from(asset_path);
+
+        // Register a custom asset source that uses the configured path
+        app.register_asset_source(
+            AssetSourceId::Default,
+            AssetSource::build().with_reader(move || {
+                Box::new(bevy::asset::io::file::FileAssetReader::new(path.clone()))
+            }),
+        );
+    }
+}
+
 /// Store an error message from the error handler
 #[doc(hidden)]
 pub fn store_error(message: String) {
@@ -125,12 +148,18 @@ macro_rules! export_embedded_app {
             #[cfg(target_os = "ios")]
             $crate::ios::create_window_from_host(&mut app);
 
+            #[cfg(target_os = "macos")]
+            $crate::macos::create_window_from_host(&mut app);
+
             #[cfg(target_os = "android")]
             $crate::android::create_window_from_host(&mut app);
 
             // Configure embedded asset source for Android (must be before plugins)
             #[cfg(target_os = "android")]
             $crate::android::configure_embedded_asset_source(&mut app);
+
+            // Configure custom asset path if provided by host (must be before plugins that use assets)
+            $crate::configure_asset_path(&mut app);
 
             // Call post-init hook
             <$app_type>::post_init(&mut app);

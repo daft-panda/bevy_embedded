@@ -1,9 +1,9 @@
 //! Embedded widget support for Bevy Engine
 //!
 //! This crate provides the ability to embed Bevy as a widget within native applications
-//! on iOS, Android and WASM platforms. Instead of using winit to manage windows and input,
-//! the host application provides a surface (CAMetalLayer on iOS, SurfaceView on Android,
-//! Canvas on WASM) and forwards input events to Bevy.
+//! on iOS, macOS, Android and WASM platforms. Instead of using winit to manage windows and input,
+//! the host application provides a surface (CAMetalLayer on iOS, NSView on macOS,
+//! SurfaceView on Android, Canvas on WASM) and forwards input events to Bevy.
 //!
 //! # Architecture
 //!
@@ -16,11 +16,15 @@
 
 mod app_trait;
 mod channel;
+mod config;
 mod input;
 mod plugin;
 
 #[cfg(target_os = "ios")]
 pub mod ios;
+
+#[cfg(target_os = "macos")]
+pub mod macos;
 
 #[cfg(target_os = "android")]
 pub mod android;
@@ -30,11 +34,15 @@ pub mod wasm;
 
 pub use app_trait::*;
 pub use channel::*;
+pub use config::*;
 pub use input::*;
 pub use plugin::*;
 
 #[cfg(target_os = "ios")]
 pub use ios::*;
+
+#[cfg(target_os = "macos")]
+pub use macos::*;
 
 #[cfg(target_os = "android")]
 pub use android::*;
@@ -48,6 +56,9 @@ pub mod prelude {
 
     #[cfg(target_os = "ios")]
     pub use crate::ios::*;
+
+    #[cfg(target_os = "macos")]
+    pub use crate::macos::*;
 
     #[cfg(target_os = "android")]
     pub use crate::android::*;
