@@ -6,10 +6,16 @@ use bevy::{
         entity::Entity,
         message::MessageWriter,
         query::With,
+        schedule::IntoScheduleConfigs,
         system::{Query, ResMut},
     },
-    input::touch::TouchInput,
-    input::touch::TouchPhase as BevyTouchPhase,
+    input::{
+        InputSystems,
+        keyboard::{Key, KeyboardInput},
+        mouse::{MouseButtonInput, MouseMotion},
+        touch::TouchInput,
+        touch::TouchPhase as BevyTouchPhase,
+    },
     window::{Window, exit_on_all_closed},
 };
 
@@ -47,7 +53,8 @@ impl Plugin for EmbeddedPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EmbeddedInputEvents>()
             .init_resource::<HostChannel>()
-            .add_systems(PreUpdate, process_embedded_input)
+            // Must run before InputSystems so events are available for Bevy's input systems
+            .add_systems(PreUpdate, process_embedded_input.before(InputSystems))
             .add_systems(Last, exit_on_all_closed);
     }
 
@@ -81,6 +88,9 @@ impl Plugin for EmbeddedPlugin {
 fn process_embedded_input(
     mut input_events: ResMut<EmbeddedInputEvents>,
     mut touch_writer: MessageWriter<TouchInput>,
+    mut keyboard_writer: MessageWriter<KeyboardInput>,
+    mut mouse_button_writer: MessageWriter<MouseButtonInput>,
+    mut mouse_motion_writer: MessageWriter<MouseMotion>,
     windows: Query<Entity, With<Window>>,
 ) {
     // Get the primary window entity (or first available)
@@ -103,6 +113,32 @@ fn process_embedded_input(
                 force: None,
                 id: event.id,
             });
+        }
+
+        // Process keyboard events
+        for event in input_events.keyboard_events.drain(..) {
+            keyboard_writer.write(KeyboardInput {
+                key_code: event.key_code,
+                logical_key: Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
+                state: event.state,
+                text: None,
+                repeat: false,
+                window,
+            });
+        }
+
+        // Process mouse button events
+        for event in input_events.mouse_button_events.drain(..) {
+            mouse_button_writer.write(MouseButtonInput {
+                button: event.button,
+                state: event.state,
+                window,
+            });
+        }
+
+        // Process mouse motion events
+        for event in input_events.mouse_motion_events.drain(..) {
+            mouse_motion_writer.write(MouseMotion { delta: event.delta });
         }
     }
 

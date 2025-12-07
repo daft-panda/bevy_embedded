@@ -14,8 +14,8 @@ static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
 /// This should be called before adding plugins that use assets.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn configure_asset_path(app: &mut App) {
-    use bevy::asset::io::{AssetSource, AssetSourceId};
     use bevy::asset::AssetApp;
+    use bevy::asset::io::{AssetSource, AssetSourceId};
     use std::path::PathBuf;
 
     if let Some(asset_path) = crate::config::get_asset_path() {

@@ -24,12 +24,14 @@ use raw_window_handle::{
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
+use wayland_backend::client::Backend;
 use wayland_client::{
     Connection, Dispatch, Proxy, QueueHandle,
-    protocol::{wl_compositor, wl_subcompositor, wl_subsurface, wl_surface, wl_registry},
     globals::{GlobalListContents, registry_queue_init},
+    protocol::{
+        wl_compositor, wl_region, wl_registry, wl_subcompositor, wl_subsurface, wl_surface,
+    },
 };
-use wayland_backend::client::Backend;
 
 use crate::host_interface::{HostInterface, SurfaceInfo};
 use crate::{EmbeddedInputEvents, EmbeddedTouchEvent, TouchPhase};
@@ -155,9 +157,24 @@ impl Dispatch<wl_subsurface::WlSubsurface, ()> for RegistryState {
     }
 }
 
+impl Dispatch<wl_region::WlRegion, ()> for RegistryState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &wl_region::WlRegion,
+        _event: wl_region::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+    }
+}
+
 /// Called during app creation to create the window from the host interface.
 /// Returns the WaylandSubsurface handle which can be used for repositioning.
-pub fn create_window_from_host_with<H: HostInterface>(app: &mut App, host: &H) -> Option<Arc<WaylandSubsurface>> {
+pub fn create_window_from_host_with<H: HostInterface>(
+    app: &mut App,
+    host: &H,
+) -> Option<Arc<WaylandSubsurface>> {
     let Some(surface) = host.get_surface() else {
         log::error!("Host did not provide a surface");
         return None;
@@ -169,7 +186,10 @@ pub fn create_window_from_host_with<H: HostInterface>(app: &mut App, host: &H) -
 /// Create window from surface info.
 /// This will create a subsurface parented to the provided surface.
 /// Returns the WaylandSubsurface handle which can be used for repositioning.
-pub fn create_window_from_surface(app: &mut App, surface: SurfaceInfo) -> Option<Arc<WaylandSubsurface>> {
+pub fn create_window_from_surface(
+    app: &mut App,
+    surface: SurfaceInfo,
+) -> Option<Arc<WaylandSubsurface>> {
     if surface.view.is_null() {
         log::error!("Host provided a null surface pointer");
         return None;
@@ -197,30 +217,40 @@ pub fn create_window_from_surface(app: &mut App, surface: SurfaceInfo) -> Option
                 bevy_surface_ptr
             );
             let subsurface_arc = Arc::new(subsurface);
-            (WaylandSurfaceWrapper {
-                window_handle: unsafe {
-                    WaylandWindowHandle::new(NonNull::new_unchecked(bevy_surface_ptr as *mut _))
+            (
+                WaylandSurfaceWrapper {
+                    window_handle: unsafe {
+                        WaylandWindowHandle::new(NonNull::new_unchecked(bevy_surface_ptr as *mut _))
+                    },
+                    display_handle: unsafe {
+                        WaylandDisplayHandle::new(NonNull::new_unchecked(
+                            surface.wayland_display as *mut _,
+                        ))
+                    },
+                    _subsurface: Some(subsurface_arc.clone()),
                 },
-                display_handle: unsafe {
-                    WaylandDisplayHandle::new(NonNull::new_unchecked(surface.wayland_display as *mut _))
-                },
-                _subsurface: Some(subsurface_arc.clone()),
-            }, Some(subsurface_arc))
+                Some(subsurface_arc),
+            )
         }
         Err(e) => {
             log::warn!(
                 "Failed to create subsurface ({}), using parent surface directly (may cause issues)",
                 e
             );
-            (WaylandSurfaceWrapper {
-                window_handle: unsafe {
-                    WaylandWindowHandle::new(NonNull::new_unchecked(surface.view as *mut _))
+            (
+                WaylandSurfaceWrapper {
+                    window_handle: unsafe {
+                        WaylandWindowHandle::new(NonNull::new_unchecked(surface.view as *mut _))
+                    },
+                    display_handle: unsafe {
+                        WaylandDisplayHandle::new(NonNull::new_unchecked(
+                            surface.wayland_display as *mut _,
+                        ))
+                    },
+                    _subsurface: None,
                 },
-                display_handle: unsafe {
-                    WaylandDisplayHandle::new(NonNull::new_unchecked(surface.wayland_display as *mut _))
-                },
-                _subsurface: None,
-            }, None)
+                None,
+            )
         }
     };
 
@@ -248,9 +278,7 @@ pub fn create_window_from_surface(app: &mut App, surface: SurfaceInfo) -> Option
 /// Create a Wayland subsurface for Bevy to render into
 fn create_subsurface(surface: &SurfaceInfo) -> Result<(*const c_void, WaylandSubsurface), String> {
     // Connect to the Wayland display using the foreign display pointer
-    let backend = unsafe {
-        Backend::from_foreign_display(surface.wayland_display as *mut _)
-    };
+    let backend = unsafe { Backend::from_foreign_display(surface.wayland_display as *mut _) };
     let conn = Connection::from_backend(backend);
 
     // Initialize the registry
@@ -290,17 +318,27 @@ fn create_subsurface(surface: &SurfaceInfo) -> Result<(*const c_void, WaylandSub
     subsurface.set_position(surface.x, surface.y);
     subsurface.set_desync();
 
+    // Make the surface input-transparent by setting an empty input region
+    // This allows input events to pass through to the GTK widget underneath
+    let empty_region = compositor.create_region(&qh, ());
+    bevy_surface.set_input_region(Some(&empty_region));
+    bevy_surface.commit();
+
     // Flush the connection
-    conn.flush().map_err(|e| format!("Failed to flush connection: {}", e))?;
+    conn.flush()
+        .map_err(|e| format!("Failed to flush connection: {}", e))?;
 
     // Get the raw pointer for the Bevy surface
     let bevy_surface_ptr = bevy_surface.id().as_ptr() as *const c_void;
 
-    Ok((bevy_surface_ptr, WaylandSubsurface {
-        _surface: bevy_surface,
-        subsurface,
-        connection: conn,
-    }))
+    Ok((
+        bevy_surface_ptr,
+        WaylandSubsurface {
+            _surface: bevy_surface,
+            subsurface,
+            connection: conn,
+        },
+    ))
 }
 
 /// Handle a mouse button event from Linux

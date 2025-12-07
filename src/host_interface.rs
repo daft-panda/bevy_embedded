@@ -166,3 +166,35 @@ pub fn receive_message(app: &App) -> Option<Vec<u8>> {
         .get_resource::<HostChannel>()
         .and_then(|channel| channel.receive())
 }
+
+// ============================================================================
+// Input forwarding helpers
+// ============================================================================
+
+use bevy::input::ButtonState;
+use bevy::input::keyboard::KeyCode;
+use bevy::input::mouse::MouseButton;
+use bevy::math::Vec2;
+
+use crate::EmbeddedInputEvents;
+
+/// Send a keyboard event to Bevy
+pub fn send_keyboard_event(app: &mut App, key_code: KeyCode, state: ButtonState) {
+    if let Some(mut input_events) = app.world_mut().get_resource_mut::<EmbeddedInputEvents>() {
+        input_events.add_keyboard_event(key_code, state);
+    }
+}
+
+/// Send a mouse button event to Bevy
+pub fn send_mouse_button_event(app: &mut App, button: MouseButton, state: ButtonState) {
+    if let Some(mut input_events) = app.world_mut().get_resource_mut::<EmbeddedInputEvents>() {
+        input_events.add_mouse_button_event(button, state);
+    }
+}
+
+/// Send a mouse motion event to Bevy
+pub fn send_mouse_motion_event(app: &mut App, delta: Vec2) {
+    if let Some(mut input_events) = app.world_mut().get_resource_mut::<EmbeddedInputEvents>() {
+        input_events.add_mouse_motion_event(delta);
+    }
+}

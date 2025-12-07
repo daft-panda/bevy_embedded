@@ -3,7 +3,7 @@
 //! This module provides a universal configuration struct that can be passed
 //! from the host application to configure the embedded Bevy instance.
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 use std::sync::Mutex;
 
 /// Configuration passed from the host application to the embedded Bevy app.
