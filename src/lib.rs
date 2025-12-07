@@ -33,6 +33,9 @@ pub mod macos;
 #[cfg(target_os = "android")]
 pub mod android;
 
+#[cfg(target_os = "linux")]
+pub mod linux;
+
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
@@ -51,6 +54,9 @@ pub use macos::*;
 #[cfg(target_os = "android")]
 pub use android::*;
 
+#[cfg(target_os = "linux")]
+pub use linux::*;
+
 #[cfg(target_arch = "wasm32")]
 pub use wasm::*;
 
@@ -66,6 +72,9 @@ pub mod prelude {
 
     #[cfg(target_os = "android")]
     pub use crate::android::*;
+
+    #[cfg(target_os = "linux")]
+    pub use crate::linux::*;
 
     #[cfg(target_arch = "wasm32")]
     pub use crate::wasm::*;
