@@ -665,6 +665,9 @@ dependencies = [
  "raw-window-handle",
  "raw-window-metal",
  "wasm-bindgen",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
  "web-sys",
 ]
 

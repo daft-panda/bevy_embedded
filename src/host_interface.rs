@@ -14,7 +14,7 @@ use crate::HostChannel;
 
 /// Surface information provided by the host
 pub struct SurfaceInfo {
-    /// Pointer to the native view (NSView, UIView, ANativeWindow, etc.)
+    /// Pointer to the native view/surface (NSView, UIView, ANativeWindow, wl_surface, etc.)
     pub view: *const c_void,
     /// Width in physical pixels
     pub width: u32,
@@ -22,6 +22,15 @@ pub struct SurfaceInfo {
     pub height: u32,
     /// Scale factor for retina/high-DPI displays
     pub scale_factor: f32,
+    /// Linux/Wayland: pointer to wl_display
+    #[cfg(target_os = "linux")]
+    pub wayland_display: *const c_void,
+    /// Linux/Wayland: X position relative to parent surface
+    #[cfg(target_os = "linux")]
+    pub x: i32,
+    /// Linux/Wayland: Y position relative to parent surface
+    #[cfg(target_os = "linux")]
+    pub y: i32,
 }
 
 // Safety: The view pointer is only accessed from the main thread where

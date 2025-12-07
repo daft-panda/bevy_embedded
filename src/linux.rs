@@ -31,39 +31,27 @@ use wayland_client::{
 };
 use wayland_backend::client::Backend;
 
-use crate::host_interface::HostInterface;
+use crate::host_interface::{HostInterface, SurfaceInfo};
 use crate::{EmbeddedInputEvents, EmbeddedTouchEvent, TouchPhase};
 
-/// Surface info for Wayland - provide the parent surface and display,
-/// and bevy_embedded will create a subsurface for rendering.
-pub struct WaylandSurfaceInfo {
-    /// The parent wl_surface pointer (e.g., from GDK)
-    pub surface: *const c_void,
-    /// The wl_display pointer
-    pub display: *const c_void,
-    /// X position relative to parent surface
-    pub x: i32,
-    /// Y position relative to parent surface
-    pub y: i32,
-    /// Width in physical pixels
-    pub width: u32,
-    /// Height in physical pixels
-    pub height: u32,
-    /// Scale factor
-    pub scale_factor: f32,
-}
-
-unsafe impl Send for WaylandSurfaceInfo {}
-unsafe impl Sync for WaylandSurfaceInfo {}
-
-/// Holds the Wayland objects we need to keep alive
-struct WaylandSubsurface {
+/// Holds the Wayland objects we need to keep alive and allows repositioning
+pub struct WaylandSubsurface {
     /// The surface we created for Bevy to render to
     _surface: wl_surface::WlSurface,
-    /// The subsurface relationship
-    _subsurface: wl_subsurface::WlSubsurface,
+    /// The subsurface relationship (kept for repositioning)
+    subsurface: wl_subsurface::WlSubsurface,
     /// Keep the connection alive
-    _connection: Connection,
+    connection: Connection,
+}
+
+impl WaylandSubsurface {
+    /// Update the subsurface position relative to the parent surface
+    pub fn set_position(&self, x: i32, y: i32) {
+        self.subsurface.set_position(x, y);
+        if let Err(e) = self.connection.flush() {
+            log::warn!("Failed to flush connection after set_position: {}", e);
+        }
+    }
 }
 
 unsafe impl Send for WaylandSubsurface {}
@@ -74,7 +62,7 @@ struct WaylandSurfaceWrapper {
     window_handle: WaylandWindowHandle,
     display_handle: WaylandDisplayHandle,
     /// Keep the subsurface alive
-    _subsurface: Option<WaylandSubsurface>,
+    _subsurface: Option<Arc<WaylandSubsurface>>,
 }
 
 unsafe impl Send for WaylandSurfaceWrapper {}
@@ -167,70 +155,72 @@ impl Dispatch<wl_subsurface::WlSubsurface, ()> for RegistryState {
     }
 }
 
-/// Called during app creation to create the window from the host interface
-pub fn create_window_from_host_with<H: HostInterface>(_app: &mut App, host: &H) {
+/// Called during app creation to create the window from the host interface.
+/// Returns the WaylandSubsurface handle which can be used for repositioning.
+pub fn create_window_from_host_with<H: HostInterface>(app: &mut App, host: &H) -> Option<Arc<WaylandSubsurface>> {
     let Some(surface) = host.get_surface() else {
         log::error!("Host did not provide a surface");
-        return;
+        return None;
     };
 
-    log::error!("Linux/Wayland requires WaylandSurfaceInfo, not generic SurfaceInfo. Use create_window_from_wayland_surface instead.");
-    drop(surface);
+    create_window_from_surface(app, surface)
 }
 
-/// Create window from Wayland surface info.
+/// Create window from surface info.
 /// This will create a subsurface parented to the provided surface.
-pub fn create_window_from_wayland_surface(app: &mut App, surface_info: WaylandSurfaceInfo) {
-    if surface_info.surface.is_null() {
+/// Returns the WaylandSubsurface handle which can be used for repositioning.
+pub fn create_window_from_surface(app: &mut App, surface: SurfaceInfo) -> Option<Arc<WaylandSubsurface>> {
+    if surface.view.is_null() {
         log::error!("Host provided a null surface pointer");
-        return;
+        return None;
     }
 
-    if surface_info.display.is_null() {
+    if surface.wayland_display.is_null() {
         log::error!("Host provided a null display pointer");
-        return;
+        return None;
     }
 
     log::info!(
         "Creating embedded Linux/Wayland window: {}x{} @ {}x scale, parent_surface={:p}, display={:p}",
-        surface_info.width,
-        surface_info.height,
-        surface_info.scale_factor,
-        surface_info.surface,
-        surface_info.display
+        surface.width,
+        surface.height,
+        surface.scale_factor,
+        surface.view,
+        surface.wayland_display
     );
 
     // Try to create a subsurface; fall back to using the parent surface directly if it fails
-    let surface_wrapper = match create_subsurface(&surface_info) {
+    let (surface_wrapper, subsurface_handle) = match create_subsurface(&surface) {
         Ok((bevy_surface_ptr, subsurface)) => {
             log::info!(
                 "Created Wayland subsurface for Bevy: {:p}",
                 bevy_surface_ptr
             );
-            WaylandSurfaceWrapper {
+            let subsurface_arc = Arc::new(subsurface);
+            (WaylandSurfaceWrapper {
                 window_handle: unsafe {
                     WaylandWindowHandle::new(NonNull::new_unchecked(bevy_surface_ptr as *mut _))
                 },
                 display_handle: unsafe {
-                    WaylandDisplayHandle::new(NonNull::new_unchecked(surface_info.display as *mut _))
+                    WaylandDisplayHandle::new(NonNull::new_unchecked(surface.wayland_display as *mut _))
                 },
-                _subsurface: Some(subsurface),
-            }
+                _subsurface: Some(subsurface_arc.clone()),
+            }, Some(subsurface_arc))
         }
         Err(e) => {
             log::warn!(
                 "Failed to create subsurface ({}), using parent surface directly (may cause issues)",
                 e
             );
-            WaylandSurfaceWrapper {
+            (WaylandSurfaceWrapper {
                 window_handle: unsafe {
-                    WaylandWindowHandle::new(NonNull::new_unchecked(surface_info.surface as *mut _))
+                    WaylandWindowHandle::new(NonNull::new_unchecked(surface.view as *mut _))
                 },
                 display_handle: unsafe {
-                    WaylandDisplayHandle::new(NonNull::new_unchecked(surface_info.display as *mut _))
+                    WaylandDisplayHandle::new(NonNull::new_unchecked(surface.wayland_display as *mut _))
                 },
                 _subsurface: None,
-            }
+            }, None)
         }
     };
 
@@ -243,8 +233,8 @@ pub fn create_window_from_wayland_surface(app: &mut App, surface_info: WaylandSu
 
     // Create the Window entity with the native surface
     let window = Window {
-        resolution: WindowResolution::new(surface_info.width, surface_info.height)
-            .with_scale_factor_override(surface_info.scale_factor),
+        resolution: WindowResolution::new(surface.width, surface.height)
+            .with_scale_factor_override(surface.scale_factor),
         ..Default::default()
     };
 
@@ -252,13 +242,14 @@ pub fn create_window_from_wayland_surface(app: &mut App, surface_info: WaylandSu
         .spawn((window, handle_wrapper, handle_holder, PrimaryWindow));
 
     log::info!("Embedded Linux/Wayland window created successfully");
+    subsurface_handle
 }
 
 /// Create a Wayland subsurface for Bevy to render into
-fn create_subsurface(surface_info: &WaylandSurfaceInfo) -> Result<(*const c_void, WaylandSubsurface), String> {
+fn create_subsurface(surface: &SurfaceInfo) -> Result<(*const c_void, WaylandSubsurface), String> {
     // Connect to the Wayland display using the foreign display pointer
     let backend = unsafe {
-        Backend::from_foreign_display(surface_info.display as *mut _)
+        Backend::from_foreign_display(surface.wayland_display as *mut _)
     };
     let conn = Connection::from_backend(backend);
 
@@ -284,7 +275,7 @@ fn create_subsurface(surface_info: &WaylandSurfaceInfo) -> Result<(*const c_void
     let parent_surface_id = unsafe {
         wayland_client::backend::ObjectId::from_ptr(
             wl_surface::WlSurface::interface(),
-            surface_info.surface as *mut _,
+            surface.view as *mut _,
         )
         .map_err(|e| format!("Failed to create parent surface ID: {:?}", e))?
     };
@@ -296,7 +287,7 @@ fn create_subsurface(surface_info: &WaylandSurfaceInfo) -> Result<(*const c_void
     let subsurface = subcompositor.get_subsurface(&bevy_surface, &parent_surface, &qh, ());
 
     // Position relative to parent surface and set to desync mode for independent rendering
-    subsurface.set_position(surface_info.x, surface_info.y);
+    subsurface.set_position(surface.x, surface.y);
     subsurface.set_desync();
 
     // Flush the connection
@@ -307,8 +298,8 @@ fn create_subsurface(surface_info: &WaylandSurfaceInfo) -> Result<(*const c_void
 
     Ok((bevy_surface_ptr, WaylandSubsurface {
         _surface: bevy_surface,
-        _subsurface: subsurface,
-        _connection: conn,
+        subsurface,
+        connection: conn,
     }))
 }
 
