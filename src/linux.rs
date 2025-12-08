@@ -56,6 +56,19 @@ impl WaylandSubsurface {
     }
 }
 
+impl Drop for WaylandSubsurface {
+    fn drop(&mut self) {
+        log::info!("Destroying Wayland subsurface and surface");
+        // Destroy the subsurface relationship first
+        self.subsurface.destroy();
+        // Then destroy the surface
+        self._surface.destroy();
+        if let Err(e) = self.connection.flush() {
+            log::warn!("Failed to flush connection after destroy: {}", e);
+        }
+    }
+}
+
 unsafe impl Send for WaylandSubsurface {}
 unsafe impl Sync for WaylandSubsurface {}
 

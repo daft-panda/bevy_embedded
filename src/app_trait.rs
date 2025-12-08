@@ -281,8 +281,8 @@ macro_rules! export_embedded_app {
             // Add the EmbeddedPlugin first
             app.add_plugins($crate::EmbeddedPlugin);
 
-            // Insert the WASM host channel
-            app.insert_resource($crate::wasm::WasmHostChannel);
+            // Insert the host channel (unified type for all platforms)
+            app.insert_resource($crate::HostChannel::default());
 
             // Create the window with the provided dimensions
             $crate::wasm::create_window_from_host(&mut app, width, height);

@@ -4,13 +4,12 @@
 //! using JavaScript interop via wasm-bindgen.
 
 use bevy::app::App;
-use bevy::ecs::resource::Resource;
 use bevy::math::Vec2;
 use bevy::window::{PresentMode, Window, WindowResolution};
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use wasm_bindgen::prelude::*;
 
+use crate::channel::{host_receive_from_bevy, host_send_to_bevy};
 use crate::input::{EmbeddedInputEvents, EmbeddedTouchEvent, TouchPhase};
 
 // Note: bevy_embedded_resize is intentionally not provided - Bevy's web backend
@@ -18,41 +17,19 @@ use crate::input::{EmbeddedInputEvents, EmbeddedTouchEvent, TouchPhase};
 
 thread_local! {
     static WASM_APP: RefCell<Option<App>> = const { RefCell::new(None) };
-    static HOST_TO_BEVY: RefCell<VecDeque<Vec<u8>>> = const { RefCell::new(VecDeque::new()) };
-    static BEVY_TO_HOST: RefCell<VecDeque<Vec<u8>>> = const { RefCell::new(VecDeque::new()) };
-}
-
-/// WASM-specific host channel that uses thread-local queues
-#[derive(Resource, Default)]
-pub struct WasmHostChannel;
-
-impl WasmHostChannel {
-    /// Send a message to the host (JavaScript)
-    pub fn send(&self, data: Vec<u8>) {
-        BEVY_TO_HOST.with(|queue| {
-            queue.borrow_mut().push_back(data);
-        });
-    }
-
-    /// Receive a message from the host (non-blocking)
-    pub fn receive(&self) -> Option<Vec<u8>> {
-        HOST_TO_BEVY.with(|queue| queue.borrow_mut().pop_front())
-    }
 }
 
 /// JavaScript-callable function to send a message from host to Bevy
 #[wasm_bindgen]
 pub fn bevy_embedded_send_message(data: &[u8]) {
-    HOST_TO_BEVY.with(|queue| {
-        queue.borrow_mut().push_back(data.to_vec());
-    });
+    host_send_to_bevy(data.to_vec());
 }
 
 /// JavaScript-callable function to receive a message from Bevy
 /// Returns null if no message is available
 #[wasm_bindgen]
 pub fn bevy_embedded_receive_message() -> Option<Vec<u8>> {
-    BEVY_TO_HOST.with(|queue| queue.borrow_mut().pop_front())
+    host_receive_from_bevy()
 }
 
 /// JavaScript-callable function to send a touch event
