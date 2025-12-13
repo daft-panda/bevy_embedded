@@ -77,7 +77,7 @@ impl HostInterface for ExternHostInterface {
             scale_factor: f32,
         }
 
-        extern "C" {
+        unsafe extern "C" {
             fn bevy_embedded_get_surface(out: *mut CSurfaceInfo);
         }
 
