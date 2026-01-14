@@ -15,7 +15,7 @@ static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
 #[cfg(not(target_arch = "wasm32"))]
 pub fn configure_asset_path(app: &mut App) {
     use bevy::asset::AssetApp;
-    use bevy::asset::io::{AssetSource, AssetSourceId};
+    use bevy::asset::io::{AssetSourceBuilder, AssetSourceId};
     use std::path::PathBuf;
 
     if let Some(asset_path) = crate::config::get_asset_path() {
@@ -26,7 +26,7 @@ pub fn configure_asset_path(app: &mut App) {
         // Register a custom asset source that uses the configured path
         app.register_asset_source(
             AssetSourceId::Default,
-            AssetSource::build().with_reader(move || {
+            AssetSourceBuilder::new(move || {
                 Box::new(bevy::asset::io::file::FileAssetReader::new(path.clone()))
             }),
         );

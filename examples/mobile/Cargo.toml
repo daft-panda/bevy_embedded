@@ -12,7 +12,7 @@ name = "bevy_mobile_embedded_example"
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-bevy = "0.17.2"
+bevy = "0.18.0"
 bevy_embedded = { path = "../../" }
 bytemuck = "1.14"
 
