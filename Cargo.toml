@@ -32,7 +32,7 @@ objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
 
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+jni = "0.22"
 ndk = "0.9"
 ndk-sys = "0.6"
 ndk-context = "0.1.1"
