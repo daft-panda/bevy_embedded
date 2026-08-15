@@ -43,16 +43,15 @@ pub fn bevy_embedded_touch_event(id: u64, phase: u8, x: f32, y: f32) {
     };
 
     WASM_APP.with(|app_cell| {
-        if let Some(app) = app_cell.borrow_mut().as_mut() {
-            if let Some(mut input_events) =
+        if let Some(app) = app_cell.borrow_mut().as_mut()
+            && let Some(mut input_events) =
                 app.world_mut().get_resource_mut::<EmbeddedInputEvents>()
-            {
-                input_events.touch_events.push(EmbeddedTouchEvent {
-                    id,
-                    phase,
-                    position: Vec2::new(x, y),
-                });
-            }
+        {
+            input_events.touch_events.push(EmbeddedTouchEvent {
+                id,
+                phase,
+                position: Vec2::new(x, y),
+            });
         }
     });
 }
@@ -66,11 +65,11 @@ pub fn bevy_embedded_update() -> bool {
             app.update();
 
             // Check if the app should exit
-            if let Some(exit) = app.should_exit() {
-                if exit.is_error() {
-                    log::error!("Bevy app exiting with error: {:?}", exit);
-                    return false;
-                }
+            if let Some(exit) = app.should_exit()
+                && exit.is_error()
+            {
+                log::error!("Bevy app exiting with error: {:?}", exit);
+                return false;
             }
             true
         } else {
@@ -147,8 +146,9 @@ pub fn configure_wasm_asset_path(app: &mut App, path: impl Into<String>) {
     let path = path.into();
 
     // Create a custom asset source that uses our specified path
-    let source = AssetSourceBuilder::default()
-        .with_reader(move || Box::new(bevy::asset::io::wasm::HttpWasmAssetReader::new(&path)));
+    let source = AssetSourceBuilder::new(move || {
+        Box::new(bevy::asset::io::wasm::HttpWasmAssetReader::new(&path))
+    });
 
     // Register it as the default source (must be done before AssetPlugin is added)
     app.register_asset_source(AssetSourceId::Default, source);

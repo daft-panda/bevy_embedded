@@ -65,7 +65,7 @@ fn setup_scene(
     commands.spawn((
         PointLight {
             intensity: 1_000_000.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(4.0, 8.0, 4.0),
@@ -134,7 +134,7 @@ fn handle_messages(
 
             // Update cube material color
             for material_handle in cubes.iter_mut() {
-                if let Some(material) = materials.get_mut(&material_handle.0) {
+                if let Some(mut material) = materials.get_mut(&material_handle.0) {
                     material.base_color = Color::srgba(r, g, b, a);
                 }
             }

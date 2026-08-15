@@ -1,6 +1,6 @@
 [package]
 name = "bevy_embedded"
-version = "0.18.0"
+version = "0.19.1"
 edition = "2024"
 description = "Embedded widget support for Bevy Engine"
 homepage = "https://bevyengine.org"
@@ -9,10 +9,13 @@ license = "MIT OR Apache-2.0"
 keywords = ["bevy", "embedded", "widget", "ios", "android", "wasm"]
 
 [dependencies]
-bevy = { version = "0.18.0", default-features = false, features = ["std", "bevy_render", "bevy_asset"]}
+bevy = { version = "0.19.1", default-features = false, features = ["std", "bevy_render", "bevy_asset", "bevy_log"]}
 raw-window-handle = "0.6"
 crossbeam-channel = "0.5"
 log = "0.4"
+
+[dev-dependencies]
+bevy = { version = "0.19.1", default-features = false, features = ["bevy_winit", "x11"] }
 
 [workspace]
 resolver = "2"

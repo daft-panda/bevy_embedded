@@ -56,14 +56,20 @@ pub fn take_last_error() -> Option<String> {
 ///
 /// ```no_run
 /// use bevy::prelude::*;
-/// use bevy_embedded::prelude::*;
+/// use bevy_embedded::{export_embedded_app, prelude::*};
 ///
 /// struct MyEmbeddedApp;
 ///
+/// fn setup_scene() {}
+///
 /// impl EmbeddedApp for MyEmbeddedApp {
 ///     fn setup(app: &mut App) {
-///         app.add_plugins(DefaultPlugins.build().disable::<WinitPlugin>())
-///             .add_systems(Startup, setup_scene);
+///         app.add_plugins(
+///             DefaultPlugins
+///                 .build()
+///                 .disable::<bevy::winit::WinitPlugin>(),
+///         )
+///         .add_systems(Startup, setup_scene);
 ///     }
 /// }
 ///
@@ -102,7 +108,8 @@ pub trait EmbeddedApp {
 /// # Example
 ///
 /// ```no_run
-/// use bevy_embedded::prelude::*;
+/// use bevy::prelude::App;
+/// use bevy_embedded::{export_embedded_app, prelude::*};
 ///
 /// struct MyApp;
 ///
